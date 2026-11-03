@@ -99,7 +99,7 @@ first, changes only what's missing or out of date, and prints `ok` or
 | Step | What |
 |------|------|
 | Homebrew packages | `wireguard-tools` (`wg`, `wg-quick`, `wireguard-go`) and `wgcf` (Cloudflare WARP account tool). Without Homebrew it prints how to install it and stops |
-| `~/wg-tunnels` | `carriers/`, `config/`, `exports/`, `warp/`, all `0700` (they hold private keys) |
+| `~/wg-tunnels` | Your working folders, [below](#your-folders), all `0700` (they hold private keys) |
 | WARP | Registers one free WARP account for this Mac (`wgcf register`, which accepts Cloudflare's terms of service) and writes `$(brew --prefix)/etc/wireguard/warp.conf` from it |
 | Daemon | `/usr/local/sbin/wg-tunnels` (a copy of `tunnel.sh`) and the `com.local.wg-tunnels` LaunchDaemon, using `sudo`. Reinstalled only when the repo copy differs |
 
@@ -108,6 +108,17 @@ first, changes only what's missing or out of date, and prints `ok` or
 | `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar (Homebrew cask), the plugin and a LaunchAgent that keeps SwiftBar running |
 | `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt (e.g. Ansible). Install the daemon separately as root: `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
 | `WARP_ENDPOINT=host:port` | WARP endpoint for `warp.conf` (default `162.159.192.1:2408`) |
+
+### Your folders
+
+`install.sh` creates these under `~/wg-tunnels`, each `0700`:
+
+| Folder | What goes there |
+|--------|-----------------|
+| `config/` | Every tunnel's `.conf`, one file per tunnel (the file name is the tunnel's name). This is what `tunnel.sh import` installs for the daemon; nothing runs from here directly |
+| `carriers/` | WireGuard configs to wrap WARP inside, as downloaded from your provider or server. `wgwarp-sweep.sh` turns each into `config/warped.<name>.conf`. Only needed for warped tunnels |
+| `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*. `tunnel.sh extract` replaces `config/` with the newest one. Only needed if you use the app; zips are kept |
+| `warp/` | Your Cloudflare WARP account (`wgcf-account.toml`) and profile (`wgcf-profile.conf`), made by `install.sh`. One per Mac; `warp.conf` is built from it |
 
 ## Quick start
 
@@ -260,10 +271,7 @@ it stops handshaking (then restarts it), and restarts anything that died.
 
 | Path | What |
 |------|------|
-| `~/wg-tunnels/config/` | Every tunnel's `.conf`: what `import` installs |
-| `~/wg-tunnels/carriers/` | Carrier configs, the input to `wgwarp-sweep.sh` |
-| `~/wg-tunnels/exports/` | WireGuard app export zips (kept) |
-| `~/wg-tunnels/warp/` | The WARP account (`wgcf-account.toml`) and profile |
+| `~/wg-tunnels/` | [Your folders](#your-folders): `config/`, `carriers/`, `exports/`, `warp/` |
 | `$(brew --prefix)/etc/wireguard/warp.conf` | WARP for `wg-quick`, written by `install.sh` |
 | `$(brew --prefix)/etc/wg-tunnels/` | The daemon's copies: `conf/`, `tunnels.tsv`, `state/` |
 | `/usr/local/sbin/wg-tunnels` | The daemon (a copy of `tunnel.sh`) |
