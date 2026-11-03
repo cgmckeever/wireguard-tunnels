@@ -12,7 +12,6 @@ optional Cloudflare WARP inside any tunnel, a kill switch, and a menu bar lock.
 - [Troubleshooting](#troubleshooting)
 - [How it works](#how-it-works)
 - [Uninstall](#uninstall)
-- [Repo layout](#repo-layout)
 
 ## Why
 
@@ -108,6 +107,18 @@ first, changes only what's missing or out of date, and prints `ok` or
 | `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar (Homebrew cask), the plugin and a LaunchAgent that keeps SwiftBar running |
 | `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt (e.g. Ansible). Install the daemon separately as root: `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
 | `WARP_ENDPOINT=host:port` | WARP endpoint for `warp.conf` (default `162.159.192.1:2408`) |
+
+### The scripts
+
+Run them by their path (see [Quick start](#quick-start)):
+
+| Script | What |
+|--------|------|
+| `install.sh` | Sets everything up: prerequisites, your folders, WARP, the daemon; `--swiftbar` for the menu bar. Safe to re-run |
+| `scripts/tunnel.sh` | The command you use day to day: `up`, `down`, `status`, `import`… ([Commands](#tunnelsh)). Installed as the daemon too |
+| `scripts/wgwarp-sweep.sh` | Turns carrier configs into warped ones ([Warped tunnels](#warped-tunnels)) |
+| `scripts/askpass.sh` | Password dialog for `sudo -A`, used by the menu bar; not run by hand |
+| `scripts/swiftbar/tunnel-status.5s.sh` | The SwiftBar plugin; `install.sh --swiftbar` links it in |
 
 ### Your folders
 
@@ -301,13 +312,3 @@ brew uninstall --cask swiftbar                            # if nothing else uses
 ```
 
 And the packages, if nothing else uses them: `brew uninstall wgcf wireguard-tools`.
-
-## Repo layout
-
-| File | What |
-|------|------|
-| `install.sh` | Prerequisites, WARP, the daemon; `--swiftbar` for the menu bar |
-| `scripts/tunnel.sh` | The `tunnel.sh` command, and the daemon once installed |
-| `scripts/wgwarp-sweep.sh` | Turns carrier configs into warped ones |
-| `scripts/askpass.sh` | Password dialog for `sudo -A`, used by the menu bar |
-| `scripts/swiftbar/tunnel-status.5s.sh` | The SwiftBar plugin |
