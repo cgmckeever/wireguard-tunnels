@@ -12,7 +12,6 @@ optional Cloudflare WARP inside any tunnel, a kill switch, and a menu bar lock.
 - [Troubleshooting](#troubleshooting)
 - [How it works](#how-it-works)
 - [Uninstall](#uninstall)
-- [Ansible](#ansible)
 - [Repo layout](#repo-layout)
 
 ## Why
@@ -64,7 +63,7 @@ first, changes only what's missing or out of date, and prints `ok` or
 | Option | What |
 |--------|------|
 | `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar (Homebrew cask), the plugin and a LaunchAgent that keeps SwiftBar running |
-| `--no-daemon` | Skip the daemon step (see [Ansible](#ansible)) |
+| `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt (e.g. Ansible). Install the daemon separately as root: `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
 | `WARP_ENDPOINT=host:port` | WARP endpoint for `warp.conf` (default `162.159.192.1:2408`) |
 
 ## Quick start
@@ -251,44 +250,6 @@ brew uninstall --cask swiftbar                            # if nothing else uses
 ```
 
 And the packages, if nothing else uses them: `brew uninstall wgcf wireguard-tools`.
-
-## Ansible
-
-A playbook clones the repo and runs `install.sh` as the user (Homebrew refuses
-root), with `--no-daemon` because `sudo` can't prompt there; the daemon
-step runs separately with `become`. Lines with `changed` in `install.sh`'s
-output mean something changed:
-
-```yaml
-- name: Clone wireguard-tunnels
-  git:
-    repo: https://github.com/cgmckeever/wireguard-tunnels.git
-    dest: "{{ ansible_facts['env']['HOME'] }}/Documents/code/wireguard-tunnels"
-    update: no
-
-- name: Install wireguard-tunnels
-  command: "{{ ansible_facts['env']['HOME'] }}/Documents/code/wireguard-tunnels/install.sh --swiftbar --no-daemon"
-  register: wgt_install
-  changed_when: "'changed' in wgt_install.stdout"
-
-# Only when missing or different: installing restarts the daemon, and a tunnel
-# that's up drops for a few seconds
-- name: Check the installed wg-tunnels daemon
-  shell: >
-    cmp -s "{{ ansible_facts['env']['HOME'] }}/Documents/code/wireguard-tunnels/scripts/tunnel.sh" /usr/local/sbin/wg-tunnels
-    && [ -f /Library/LaunchDaemons/com.local.wg-tunnels.plist ]
-  register: wgt_current
-  changed_when: false
-  failed_when: false
-  check_mode: no
-
-- name: Install the wg-tunnels daemon
-  command: >
-    "{{ ansible_facts['env']['HOME'] }}/Documents/code/wireguard-tunnels/scripts/tunnel.sh" _install
-    "{{ ansible_facts['env']['HOME'] }}/Documents/code/wireguard-tunnels/scripts/tunnel.sh"
-  become: yes
-  when: wgt_current.rc != 0
-```
 
 ## Repo layout
 
