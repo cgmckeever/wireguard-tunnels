@@ -1,0 +1,5 @@
+# Never commit tunnel configs, WARP accounts or exports: they hold private keys
+*.conf
+*.zip
+*.toml
+.DS_Store
