@@ -25,7 +25,7 @@ Each tunnel is one of three kinds, worked out when it's imported:
 
 | Kind | What | Kill switch |
 |------|------|-------------|
-| **warped** | Named `warped.*`. Any WireGuard tunnel (the *carrier*) that carries only Cloudflare WARP; your traffic exits through WARP, so sites see a Cloudflare IP near the carrier's server | yes |
+| **warped** | Named `warped.*`. Any WireGuard tunnel (the *carrier*) that carries only Cloudflare WARP; your traffic exits through WARP, so sites see an ordinary Cloudflare IP in the carrier's city ([why](#why-wrap-warp-in-another-tunnel)) | yes |
 | **full** | Routes all of IPv4 (`0.0.0.0/0`, or the two `/1` halves) | yes |
 | **split** | Anything else: only the networks in its `AllowedIPs` | no |
 
@@ -132,8 +132,44 @@ carrier configs into warped ones; see [Warped tunnels](#warped-tunnels).
 
 A warped tunnel is two WireGuard tunnels, one inside the other: the carrier
 (any WireGuard server: a VPN provider, your own server) carries only the WARP
-tunnel, and your traffic exits through WARP. Sites see a Cloudflare IP in the
-carrier's region; the carrier sees only encrypted WARP traffic.
+tunnel, and your traffic exits through WARP.
+
+```
+your Mac ──carrier tunnel──▶ carrier server ──WARP tunnel──▶ Cloudflare ──▶ sites
+          (WARP inside it)    (sees only encrypted WARP)       (exit IP)
+```
+
+### Why wrap WARP in another tunnel?
+
+Either tunnel alone falls short:
+
+- **A VPN server alone** exits from a datacenter or VPN IP range. Sites treat
+  those with suspicion: more CAPTCHAs, "unusual traffic" pages, outright
+  blocks.
+- **WARP alone** exits from a Cloudflare IP near *you*, so sites still see
+  your region, and Cloudflare sees your home IP.
+
+Wrapped, you get both halves:
+
+- **Sites see an ordinary Cloudflare IP.** WARP addresses are shared by
+  millions of everyday WARP users, so they're rarely blocked, unlike VPN and
+  datacenter ranges.
+- **You pick the location.** WARP exits from the Cloudflare data center
+  nearest to where it's entered from, and here that's the carrier's server,
+  not you. A carrier in Toronto gives you a Cloudflare exit near Toronto.
+- **The traffic is split between two parties.** The carrier sees your IP but
+  only encrypted WARP traffic, not the sites you visit. Cloudflare sees the
+  traffic, but coming from the carrier's IP, not yours. Your local network and
+  ISP see only the carrier tunnel.
+- **It works where WARP is blocked.** A network that blocks WARP directly
+  still reaches the carrier.
+
+The trade-offs: an extra hop (a little latency, and a smaller MTU of 1280
+inside the carrier), Cloudflare still sees where your traffic goes, and a few
+sites block WARP too. It hides where you are from sites, but it isn't an
+anonymity tool: the WARP account is tied to this Mac.
+
+### Making warped configs
 
 `wgwarp-sweep.sh` makes the carrier configs: each
 `~/wg-tunnels/carriers/<name>.conf` becomes
