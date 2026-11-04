@@ -25,6 +25,14 @@ done
 
 st() { awk -v k="$1" '$1 == k {$1 = ""; sub(/^ /, ""); print; exit}' "$STATUS" 2>/dev/null; }
 
+# Uptime: the daemon writes current once, when a tunnel is up (a reconnect or
+# a watchdog restart starts the clock again)
+uptime_of() {
+    local t; t=$(stat -f %m "$(dirname "$STATUS")/current" 2>/dev/null) || return
+    awk -v s=$(( $(date +%s) - t )) 'BEGIN { d = int(s / 86400); h = int(s % 86400 / 3600); m = int(s % 3600 / 60)
+        if (d) printf "%dd %dh %dm", d, h, m; else if (h) printf "%dh %dm", h, m; else printf "%dm %ds", m, s % 60 }'
+}
+
 notify() {
     osascript - "$1" "$2" <<'OSA' >/dev/null
 on run argv
@@ -78,6 +86,7 @@ if [ "$1" = popup ]; then
         msg+="Exit: no answer (blocked or offline)"$'\n'
     fi
     if [ -n "$name" ]; then
+        msg+=$'\n'"Up: $(uptime_of)"
         msg+=$'\n'"Handshake: $(st iface | awk '{print ($3 == "" ? "never" : $3 "s ago")}')"
         [ -n "$(st warp)" ] && msg+=$'\n'"WARP handshake: $(st warp | awk '{print ($3 == "" ? "never" : $3 "s ago")}')"
         msg+=$'\n'"Kill switch: $(st armed)"
@@ -205,6 +214,7 @@ fi
 echo "---"
 if [ -n "$name" ]; then
     echo "${name} | color=green"
+    up=$(uptime_of); [ -n "$up" ] && echo "up ${up} | size=12"
     [ -n "$exit_ip" ] && echo "${exit_ip} | size=12"
     echo "${real_ip} | size=12 color=gray"
     echo "handshake ${hs:-never}s ago | size=12"
