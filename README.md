@@ -91,7 +91,7 @@ The repo can live anywhere; the examples here use
 `~/Documents/code/wireguard-tunnels`. Run `install.sh` as yourself, not with
 `sudo`: it asks for your password when it needs it.
 
-`install.sh` is safe to re-run (after a `git pull`, say). Each step checks
+`install.sh` is safe to re-run (such as after a `git pull`). Each step checks
 first, changes only what's missing or out of date, and prints `ok` or
 `changed`:
 
