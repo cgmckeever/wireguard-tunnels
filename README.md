@@ -174,12 +174,14 @@ alias wgwarp-sweep=~/Documents/code/wireguard-tunnels/scripts/wgwarp-sweep.sh
 | `import [dir]` | Install every `.conf` in `~/wg-tunnels/config` (or `dir`) for the daemon and work out each one's kind. Tunnels no longer there are removed, unless up right now |
 | `extract [zip]` | Replace `~/wg-tunnels/config` with the `.conf` files in the newest zip in `~/wg-tunnels/exports` (or the one given). The zip is the authority: configs not in it are removed. The zip is kept |
 | `extract-import` | `extract`, then `import` |
+| `rotate-warp` | New Cloudflare WARP keys: registers a new WARP account (through `install.sh`), imports it, and reconnects a warped tunnel that's up. The old account is deleted once that works, or put back if registering fails |
 | `log` | Follow the daemon's log |
 | `breakglass` | Lost the network? See [Troubleshooting](#troubleshooting) |
 | `install` | Install just the daemon (`install.sh` does this) |
 | `uninstall` | Take everything down and remove the daemon; configs are kept |
 
-`up`, `down`, `import`, `install`, `uninstall` and `breakglass` use `sudo`.
+`up`, `down`, `import`, `rotate-warp`, `install`, `uninstall` and
+`breakglass` use `sudo`.
 `up`, `down` and `import` first update the installed daemon when the repo copy
 differs.
 
@@ -224,7 +226,8 @@ carrier.
 
 The menu shows the tunnel, the exit and real IPs with their city, handshakes
 and Tx/Rx, and has Status, Reconnect, Disconnect, Breakglass and every
-imported tunnel to switch to. These run in the background and ask for your
+imported tunnel to switch to; More has the status in Terminal, the log and
+Rotate WARP Keys. These run in the background and ask for your
 password in a dialog (`askpass.sh`). The exit and real IPs come from
 [ipinfo.io](https://ipinfo.io).
 

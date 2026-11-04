@@ -20,13 +20,18 @@
 #                           Both: extract, then import
 #   tunnel.sh install       Install /usr/local/sbin/wg-tunnels and its LaunchDaemon
 #   tunnel.sh uninstall     Take everything down, remove both (configs are kept)
+#   tunnel.sh rotate-warp   New Cloudflare WARP keys: registers a new account
+#                           (install.sh), imports it, and reconnects a warped
+#                           tunnel that's up. The old account is deleted once
+#                           that works, or put back if registering fails.
 #   tunnel.sh log           Follow the daemon's log
 #   tunnel.sh breakglass    Lost the network? Stops app tunnels, the daemon,
 #                           wg-quick and wireguard-go; removes every route of ours
 #                           and any reject route; puts tunnel DNS back to DHCP;
 #                           power cycles Wi-Fi if it has no address. Trusts no state.
 #
-# up, down, import, install, uninstall and breakglass use sudo (admin users).
+# up, down, import, rotate-warp, install, uninstall and breakglass use sudo
+# (admin users).
 #
 # install.sh (in this repo) sets up what this needs: wireguard-tools, the WARP
 # config and the daemon.
@@ -335,7 +340,9 @@ wgq() {
     out=$(mktemp "$RUN/.wgq.XXXXXX")
     wg-quick "$1" "$CONF/$2.conf" > "$out" 2>&1
     rc=$?
-    grep -v 'networksetup -' "$out" | sed "s/^/  [$2] /"
+    # wg quotes a key it rejects: never let one reach the log
+    grep -v 'networksetup -' "$out" \
+        | sed -E "s/[A-Za-z0-9+/]{42,43}=?/<key>/g; s/^/  [$2] /"
     rm -f "$out"
     return "$rc"
 }
@@ -844,6 +851,39 @@ It reconnects behind the tunnel and breaks it. Turn it off (the tunnel → Edit 
     follow "$(cat "$RUN/request")"
 }
 
+# rotate-warp: a new WARP account in ~/wg-tunnels/warp. The old one waits in
+# warp.old until the new one is imported, and comes back if registering fails.
+cmd_rotate_warp() {
+    local warp="$HOME/wg-tunnels/warp" old inst active kind
+    [ "$(id -u)" -ne 0 ] || die "rotate-warp: run it as your user, not root"
+    inst="$(cd "$(dirname "$0")/.." && pwd)/install.sh"
+    [ -x "$inst" ] || die "rotate-warp: no install.sh next to $0 (run the repo's scripts/tunnel.sh)"
+    old="$warp.old"
+    [ -e "$old" ] && die "rotate-warp: ${old} is left from an earlier rotate. If WARP works, delete it; if not, put it back as ${warp}"
+    check_installed
+
+    echo "== New WARP account"
+    mv "$warp" "$old" || die "rotate-warp: can't move ${warp} aside"
+    if ! "$inst" --no-daemon; then
+        rm -rf "$warp" && mv "$old" "$warp"
+        die "rotate-warp: install.sh failed; the old account is back in ${warp}"
+    fi
+
+    echo "== Import"
+    cmd_import || die "rotate-warp: import failed. The new account is in place: run tunnel.sh import, then delete ${old}"
+    rm -rf "$old"
+    echo "Old WARP account deleted"
+
+    # A warped tunnel that's up still runs the old keys: reconnect it
+    active=$(awk '$1 == "name" {print $2}' "$RUN/status" 2>/dev/null)
+    kind=$(awk '$1 == "kind" {print $2}' "$RUN/status" 2>/dev/null)
+    if [ -n "$active" ] && [ "$kind" = warped ]; then
+        echo "== Reconnect ${active}"
+        root request up "$active" || return 1
+        follow "$(cat "$RUN/request")"
+    fi
+}
+
 cmd_breakglass() {
     echo "Breakglass: stop every tunnel and put the normal connection back"
     stop_app_tunnels
@@ -946,11 +986,12 @@ cmd_import() {
 case "${1:-status}" in
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
-    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] | extract-import | install | uninstall | log | breakglass" ;;
+    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] | extract-import | install | uninstall | rotate-warp | log | breakglass" ;;
     list)      echo "warped:"; load_tunnels warped; list warped; echo "other:"; load_tunnels other; list other ;;
     extract)   cmd_extract "$2" ;;
     import)    cmd_import "$2" ;;
     extract-import) cmd_extract "$2" && cmd_import ;;
+    rotate-warp) cmd_rotate_warp ;;
     install)   sudo "$0" _install "$0" ;;
     uninstall) [ -x "$INSTALLED" ] && sudo "$INSTALLED" _uninstall ;;
     log)       tail -f "$LOG" ;;
@@ -961,5 +1002,5 @@ case "${1:-status}" in
     _install)  cmd_install_root "$2" ;;
     _uninstall) cmd_uninstall_root ;;
     _breakglass) cmd_breakglass_root ;;
-    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] | extract-import | install | uninstall | log | breakglass" >&2; exit 1 ;;
+    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] | extract-import | install | uninstall | rotate-warp | log | breakglass" >&2; exit 1 ;;
 esac
