@@ -56,12 +56,13 @@ if [ "$1" = run ]; then
         reconnect) ;;
         up)   what="Switch to $2" ;;
         down) what="VPN off" ;;
+        rotate-warp) what="New WARP keys" ;;
         *)    what="$1" ;;
     esac
     if [ "$rc" -eq 0 ]; then
         notify "VPN" "${what}: done"
     else
-        notify "VPN" "${what}: failed — $(grep -E 'fail:|refuses|On Demand|No |Not |sorry|incorrect' <<< "$out" | tail -1 | sed 's/^ *//')"
+        notify "VPN" "${what}: failed — $(grep -E 'fail:|failed|rotate-warp:|refuses|On Demand|No |Not |sorry|incorrect' <<< "$out" | tail -1 | sed 's/^ *//')"
     fi
     exit 0
 fi
@@ -256,3 +257,4 @@ echo "---"
 echo "More"
 echo "--Status in Terminal | bash=$TUNNEL param1=status terminal=true"
 echo "--Log | bash=$TUNNEL param1=log terminal=true"
+echo "--Rotate WARP Keys | bash=$SELF param1=run param2=rotate-warp terminal=false refresh=true"

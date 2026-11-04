@@ -104,7 +104,9 @@ fi
 
 # warp.conf for wg-quick, from the wgcf profile
 profile="$WARP_DIR/wgcf-profile.conf"
-val() { awk -F'[[:space:]]*=[[:space:]]*' -v k="$1" '$1 == k {print $2; exit}' "$profile"; }
+# Everything after the first "=": keys end in base64 "=" padding, which an
+# awk split on "=" would drop
+val() { sed -nE "s/^$1[[:space:]]*=[[:space:]]*([^[:space:]]+).*/\1/p" "$profile" | head -1; }
 private_key=$(val PrivateKey)
 public_key=$(val PublicKey)
 # wgcf writes one Address line per family
