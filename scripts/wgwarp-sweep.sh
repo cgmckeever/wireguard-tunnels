@@ -13,9 +13,9 @@
 # WARP (a carrier already named warped.* or warped-* isn't prefixed twice).
 # An existing config/ file is only replaced when the new render differs.
 #
-# Then each one is checked against the WireGuard app's tunnel of the same name
-# (the app can't be scripted, so only its server address is visible) and the
-# import/re-import you need to do by hand is listed. The app is optional.
+# The last column compares each one with the WireGuard app's tunnel of the same
+# name (the app can't be scripted, so only its server address is visible) and
+# says what to do there by hand. Only for tunnels you also keep in the app.
 #
 # Override with TUNNELS_DIR (default ~/wg-tunnels) and WARP_ENDPOINT
 # (default 162.159.192.1, engage.cloudflareclient.com).
@@ -49,22 +49,27 @@ endpoint_of() {
     awk -F'[[:space:]]*=[[:space:]]*' '/^[[:space:]]*Endpoint[[:space:]]*=/ {print $2; exit}' "$1"
 }
 
-# What to do in the WireGuard app, given the config/ file's state (new/updated/unchanged)
+# The WireGuard app's copy of a tunnel (only matters if you use the app), given
+# the config/ file's state (new/updated/unchanged). Nothing here is about
+# tunnel.sh import, which reads config/ itself.
 app_action() {
-    local name="$1" endpoint="$2" state="$3" remote
+    local name="$1" endpoint="$2" state="$3" remote host ip
     if [ -z "$(scutil --nc status "$name" 2>/dev/null | head -1)" ]; then
-        echo "not in app — import"
+        echo "not there: add it in the app"
         return
     fi
     remote=$(scutil --nc show "$name" 2>/dev/null | awk -F' : ' '/RemoteAddress/ {print $2; exit}')
-    if [ "$remote" != "$endpoint" ]; then
-        echo "in app with server ${remote:-?} — delete and re-import"
+    # The app keeps the address a hostname resolved to: compare that too
+    host="${endpoint%:*}"
+    ip=$(dscacheutil -q host -a name "$host" 2>/dev/null | awk '/^ip_address:/ {print $2; exit}')
+    if [ "$remote" != "$endpoint" ] && [ "$remote" != "${ip:-$host}:${endpoint##*:}" ]; then
+        echo "there, other server (${remote:-?}): remove it and add again in the app"
     elif [ "$state" = "updated" ]; then
-        echo "in app, file changed — delete and re-import"
+        echo "there, but changed: remove it and add again in the app"
     elif [ "$state" = "new" ]; then
-        echo "in app, server matches — re-import if it wasn't imported from config/"
+        echo "there, same server: add again in the app if it wasn't from config/"
     else
-        echo "in app, server matches"
+        echo "there, same server"
     fi
 }
 
@@ -75,7 +80,7 @@ if [ ${#raws[@]} -eq 0 ]; then
     echo
 fi
 
-printf '%-28s %-10s %s\n' "TUNNEL" "FILE" "WIREGUARD APP"
+printf '%-28s %-10s %s\n' "TUNNEL" "FILE" "WIREGUARD APP (only if you use it)"
 for raw in "${raws[@]}"; do
     name="warped.$(basename "$raw" .conf | sed -E 's/^warped[.-]//')"
     out="$CONFIG_DIR/${name}.conf"
@@ -108,13 +113,12 @@ for out in "$CONFIG_DIR"/*.conf; do
     done
     [ "$src" = 1 ] && continue
     if grep -qE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_ENDPOINT//./\\.}/32[[:space:]]*$" "$out"; then
-        printf '%-28s %-10s %s\n' "$name" "orphan" "no carriers/ source — left in place"
+        printf '%-28s %-10s %s\n' "$name" "orphan" "(no carriers/ source: left in place)"
     else
         printf '%-28s %-10s %s\n' "$name" "manual" "$(app_action "$name" "$(endpoint_of "$out")" "unchanged")"
     fi
 done
 
 echo
-echo "Next: tunnel.sh import   (installs everything in ${CONFIG_DIR})"
-echo "Using the WireGuard app too? Import ${CONFIG_DIR} there, export to ${TUNNELS_DIR}/exports,"
-echo "and use tunnel.sh extract-import instead (the export replaces config/)"
+echo "Next: tunnel.sh import   (installs everything in ${CONFIG_DIR} for the daemon)"
+echo "The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise."
