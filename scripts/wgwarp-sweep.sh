@@ -7,9 +7,10 @@
 #
 # Reads every ~/wg-tunnels/carriers/<name>.conf (as downloaded from the
 # provider, named however you like) and writes
-# ~/wg-tunnels/config/warped.<name>.conf with AllowedIPs set to only the WARP
-# endpoint and the DNS line removed, so the tunnel carries WARP and nothing
-# else. The warped. prefix is how `tunnel.sh import` knows a tunnel carries
+# ~/wg-tunnels/config/warped.<name>.conf with AllowedIPs set to the WARP
+# endpoint (plus the server's own tunnel address, see extras below), the DNS
+# line removed and a keepalive, so the tunnel carries WARP and nothing else.
+# Everything WARP-specific about a carrier is done here; import only checks it. The warped. prefix is how `tunnel.sh import` knows a tunnel carries
 # WARP (a carrier already named warped.* or warped-* isn't prefixed twice).
 # An existing config/ file is only replaced when the new render differs.
 #
@@ -36,11 +37,38 @@ valid() {
         && grep -qE '^[[:space:]]*Endpoint[[:space:]]*=' "$1"
 }
 
+# A carrier's AllowedIPs beyond the WARP endpoint, from its header comments:
+#   # server-address: 192.168.250.1/32, fdaa:8f8:c196::1/128   (wireguard-tools writes this)
+#   # wg-tunnels: also 10.0.0.5/32                              (add your own)
+# The server's own tunnel address lets it reach the Mac (and the Mac reach it)
+# through the carrier. Rebuilt every sweep: delete a line and it's gone.
+# extras <conf> narrow|wide: the entries a carrier may have, or the ones refused
+# (wider than /8, or /16 for IPv6: those would take traffic away from WARP)
+extras() {
+    local e p
+    sed -nE 's/^#[[:space:]]*(server-address:|wg-tunnels:[[:space:]]*also)[[:space:]]*//p' "$1" \
+        | tr ', \t\r' '\n\n\n\n' | grep . | while read -r e; do
+            p="${e#*/}"; [ "$p" = "$e" ] && p=128
+            case "$e" in *:*) min=16 ;; *) min=8; [ "$p" = 128 ] && p=32 ;; esac
+            if [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -ge "$min" ]; then
+                [ "$2" = narrow ] && echo "$e"
+            else
+                [ "$2" = wide ] && echo "$e"
+            fi
+        done
+}
+
+# The carrier carries WARP and its extras only: AllowedIPs set, DNS gone (it
+# comes from WARP), a keepalive so a stale handshake means trouble
 render() {
-    awk -v ep="$WARP_ENDPOINT" '
+    local allowed="$WARP_ENDPOINT/32" e
+    for e in $(extras "$1" narrow); do allowed+=", $e"; done
+    awk -v allowed="$allowed" '
         { sub(/\r$/, "") }
-        /^[[:space:]]*DNS[[:space:]]*=/        { next }
-        /^[[:space:]]*AllowedIPs[[:space:]]*=/ { print "AllowedIPs = " ep "/32"; next }
+        /^[[:space:]]*DNS[[:space:]]*=/                 { next }
+        /^[[:space:]]*PersistentKeepalive[[:space:]]*=/ { next }
+        /^[[:space:]]*AllowedIPs[[:space:]]*=/          { print "AllowedIPs = " allowed; next }
+        /^[[:space:]]*Endpoint[[:space:]]*=/            { print; print "PersistentKeepalive = 25"; next }
         { print }
     ' "$1"
 }
@@ -101,6 +129,10 @@ for raw in "${raws[@]}"; do
     fi
 
     printf '%-28s %-10s %s\n' "$name" "$state" "$(app_action "$name" "$(endpoint_of "$out")" "$state")"
+    e=$(extras "$raw" narrow | paste -sd, - | sed 's/,/, /g')
+    [ -n "$e" ] && printf '%-28s %s\n' "" "└ also carries ${e}"
+    e=$(extras "$raw" wide | paste -sd, - | sed 's/,/, /g')
+    [ -n "$e" ] && printf '%-28s %s\n' "" "└ ignored, too wide (would bypass WARP): ${e}"
     # A small carrier MTU: the daemon runs WARP 80 smaller inside it (tunnel.sh)
     mtu=$(sed -nE 's/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$out" | head -1)
     if [ -n "$mtu" ] && [ "$mtu" -lt 1360 ]; then
@@ -117,7 +149,7 @@ for out in "$CONFIG_DIR"/*.conf; do
         [ "warped.$(basename "$raw" .conf | sed -E 's/^warped[.-]//')" = "$name" ] && src=1 && break
     done
     [ "$src" = 1 ] && continue
-    if grep -qE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_ENDPOINT//./\\.}/32[[:space:]]*$" "$out"; then
+    if grep -qE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_ENDPOINT//./\\.}/32([[:space:]]*,.*)?[[:space:]]*$" "$out"; then
         printf '%-28s %-10s %s\n' "$name" "orphan" "(no carriers/ source: left in place)"
     else
         printf '%-28s %-10s %s\n' "$name" "manual" "$(app_action "$name" "$(endpoint_of "$out")" "unchanged")"

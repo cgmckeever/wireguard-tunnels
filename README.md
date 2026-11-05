@@ -205,7 +205,25 @@ tunnel, and your traffic exits through WARP. See
 `wgwarp-sweep.sh` makes the carrier configs: each
 `~/wg-tunnels/carriers/<name>.conf` becomes
 `~/wg-tunnels/config/warped.<name>.conf`, with `AllowedIPs` set to the WARP
-endpoint only and the `DNS` line removed. The `warped.` prefix is how `import`
+endpoint (plus the extras below), the `DNS` line removed and
+`PersistentKeepalive = 25`. Everything WARP-specific about a carrier happens
+here: `import` takes a `warped.*` config as it is, and only checks it (the WARP
+endpoint is in `AllowedIPs`, nothing wider than a /8, no `DNS`), skipping one
+that isn't swept rather than fixing it.
+
+**Reaching the server through the carrier.** A carrier carries only WARP, so
+the server can't reach your Mac at its tunnel address (or the Mac reach the
+server's) unless that address is in `AllowedIPs` too. The sweep adds every
+address on these header lines of the carrier file:
+
+```ini
+# server-address: 192.168.250.1/32, fdaa:8f8:c196::1/128   # written by wireguard-tools
+# wg-tunnels: also 10.0.0.5/32                              # your own
+```
+
+They're rebuilt on every sweep, so deleting a line and sweeping again removes
+them. Anything wider than a /8 (/16 for IPv6) is ignored and reported, since
+it would take traffic away from WARP. The `warped.` prefix is how `import`
 knows the tunnel carries WARP. A `config/` file is only replaced when it
 differs, and any other configs there are left alone (listed as `manual`).
 

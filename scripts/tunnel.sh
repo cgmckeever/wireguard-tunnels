@@ -150,6 +150,21 @@ tsv_get() {  # tsv_get <name> — "iface kind endpoint"
 
 # kind of a config: warped (by name), full (all of IPv4: any x.x.x.x/0 — wg
 # ignores the address bits, e.g. 192.168.1.0/0 — or the two /1 halves), or split
+# A warped carrier as wgwarp-sweep.sh makes it, which import checks but doesn't
+# fix: AllowedIPs has the WARP endpoint and nothing wide (wider than /8, /16
+# for IPv6, would route traffic around WARP), and no DNS. Prints why not.
+swept_ok() {  # swept_ok <conf> <warp-endpoint>
+    local ips e p
+    grep -qiE '^[[:space:]]*DNS[[:space:]]*=' "$1" && { echo "has a DNS line"; return 1; }
+    ips=$(grep -iE '^[[:space:]]*AllowedIPs[[:space:]]*=' "$1" | sed 's/^[^=]*=//' | tr ', \t\r' '\n\n\n\n' | grep .)
+    grep -qx "$2/32" <<< "$ips" || { echo "AllowedIPs lacks the WARP endpoint $2/32"; return 1; }
+    for e in $ips; do
+        p="${e#*/}"
+        case "$e" in *:*) [ "$p" = "$e" ] && p=128; min=16 ;; *) [ "$p" = "$e" ] && p=32; min=8 ;; esac
+        { [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -ge "$min" ]; } || { echo "AllowedIPs ${e} is too wide"; return 1; }
+    done
+}
+
 kind_of() {
     local ips
     case "$1" in "$TUNNEL_PREFIX"*) echo warped; return ;; esac
@@ -173,13 +188,9 @@ render() {
         /^[[:space:]]*\[Interface\]/ { print; if (kind == "full") print "Table = off"; sec = "i"; next }
         /^[[:space:]]*\[Peer\]/      { print; sec = "p"; next }
         sec == "i" && /^[[:space:]]*Table[[:space:]]*=/ && kind == "full" { next }
-        kind == "warped" && /^[[:space:]]*DNS[[:space:]]*=/ { next }
-        kind == "warped" && /^[[:space:]]*AllowedIPs[[:space:]]*=/ { print "AllowedIPs = " wep "/32"; next }
-        kind == "warped" && /^[[:space:]]*PersistentKeepalive[[:space:]]*=/ { next }
         /^[[:space:]]*Endpoint[[:space:]]*=/ {
             port = $0; sub(/.*:/, "", port)
             print "Endpoint = " ip ":" port
-            if (kind == "warped") print "PersistentKeepalive = 25"
             next
         }
         { print }
@@ -205,7 +216,7 @@ resolve() {
 
 # _import <dir> [dry]: dry reports what an import would do and changes nothing
 cmd_import_root() {
-    local src="$1" dry="${2:-}" f name kind ep host ip iface out tmp state n wep active rows="" seen=""
+    local src="$1" dry="${2:-}" f name kind ep host ip iface out tmp state n wep active why rows="" seen=""
     need_root import
     [ -d "$src" ] || die "No folder ${src}"
     if [ -z "$dry" ]; then
@@ -240,6 +251,10 @@ cmd_import_root() {
             continue
         fi
         kind=$(kind_of "$name" "$f")
+        if [ "$kind" = warped ] && ! why=$(swept_ok "$f" "$wep"); then
+            printf '%-28s %-7s %-6s %s\n' "$name" "$kind" - "skipped: ${why} (run wgwarp-sweep.sh)"
+            continue
+        fi
         host=$(conf_val "$f" Endpoint | host_of)
         ip=$(resolve "$host")
         if [ -z "$ip" ]; then
