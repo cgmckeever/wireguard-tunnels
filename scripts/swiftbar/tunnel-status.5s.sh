@@ -136,9 +136,10 @@ mkdir -p "$DATA" 2>/dev/null
 now=$(date +%s)
 
 lookup() {  # lookup <file> <key>: refresh <file> if its key differs or it's 10 minutes old
-    local f="$DATA/$1" key="$2" k ts state rest
+    local f="$DATA/$1" key="$2" k ts state rest max=600
     read -r k ts state rest 2>/dev/null < "$f"
-    [ "$k" = "$key" ] && [ $((now - ${ts:-0})) -le 600 ] && return
+    [ "$state" = none ] && max=30   # a lookup that got no answer: try again soon
+    [ "$k" = "$key" ] && [ $((now - ${ts:-0})) -le "$max" ] && return
     # Mark it pending first so the next refresh doesn't start another
     if [ "$k" = "$key" ]; then echo "$key $now $state $rest" > "$f"; else echo "$key $now pending" > "$f"; fi
     (
@@ -161,7 +162,7 @@ shown() {  # shown <file> <key> <label>: the cached line, if it's for <key>
     if [ "$k" != "$2" ]; then echo "$3: unknown (new network since the last check without VPN)"; return; fi
     case "$state" in
         ok)   echo "$3: ${ip} — ${place}" ;;
-        none) echo "$3: no answer" ;;
+        none) echo "$3: unknown (no answer at the last check)" ;;
         *)    echo "$3: checking…" ;;
     esac
 }
