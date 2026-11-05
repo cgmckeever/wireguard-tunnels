@@ -171,6 +171,9 @@ gw=$(netstat -nr -f inet | awk '$1 == "default" && $2 !~ /^link#/ {print $2; exi
 net=$(arp -n "$gw" 2>/dev/null | awk '{print $4; exit}')
 net="${net:-${gw:-none}}"
 
+# WireGuard app tunnels that are connected (checked before the real IP lookup)
+apps=$(scutil --nc list | sed -nE \
+    's/.*\((Connected)\)[[:space:]]+[0-9A-F-]{36} VPN \(com\.wireguard\.macos\) "([^"]+)".*/\2/p' | paste -sd, -)
 exit_ip="" real_ip=""
 if [ -n "$name" ]; then
     lookup exit "$name"
@@ -201,8 +204,6 @@ if [ -n "$name" ]; then
         traffic="Tx: $(human "$tx")${rtx}"$'\n'"Rx: $(human "$rx")${rrx}"
     fi
 fi
-apps=$(scutil --nc list | sed -nE \
-    's/.*\((Connected)\)[[:space:]]+[0-9A-F-]{36} VPN \(com\.wireguard\.macos\) "([^"]+)".*/\2/p' | paste -sd, -)
 
 if [ -n "$name" ] || [ -n "$apps" ]; then
     echo " | sfimage=lock.fill sfcolor=#34C759"
