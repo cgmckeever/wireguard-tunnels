@@ -916,7 +916,7 @@ exit_line() {
 status() {
     local apps upd age od
     echo "warped:"; load_tunnels warped; list warped
-    echo "other:"; load_tunnels other; list other
+    echo; echo "other:"; load_tunnels other; list other
     echo
     if [ ! -f "$RUN/status" ]; then
         echo "daemon: not running (tunnel.sh install)"
@@ -987,7 +987,7 @@ case "${1:-status}" in
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
     status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] | extract-import | install | uninstall | rotate-warp | log | breakglass" ;;
-    list)      echo "warped:"; load_tunnels warped; list warped; echo "other:"; load_tunnels other; list other ;;
+    list)      echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other ;;
     extract)   cmd_extract "$2" ;;
     import)    cmd_import "$2" ;;
     extract-import) cmd_extract "$2" && cmd_import ;;

@@ -241,7 +241,10 @@ echo "Breakglass (Reset No Tunnel) | bash=$SELF param1=run param2=breakglass ter
 echo "---"
 # Switcher: every imported tunnel, the one up checked
 for group in warped other; do
-    [ "$group" = warped ] && echo "Warped (WARP inside a carrier tunnel) | size=11 color=gray" || echo "Other | size=11 color=gray"
+    [ "$group" = other ] && echo "---"
+    # Bold section headings (md), clickable so macOS doesn't dim them (a click refreshes)
+    [ "$group" = warped ] && echo "**WARPED** · WARP inside a carrier tunnel | md=true sfimage=lock.shield refresh=true" \
+        || echo "**OTHER** | md=true sfimage=network refresh=true"
     awk -F'\t' -v g="$group" '($3 == "warped") == (g == "warped") {print $1 "\t" $3}' "$TSV" 2>/dev/null \
         | while IFS=$'\t' read -r t kind; do
             extra=""
