@@ -278,8 +278,11 @@ route):
 | LAN, default | unchanged |
 
 The daemon brings back the last `up` after a reboot and checks every 30s: it
-re-pins the server when the gateway changes, gives WARP a new source port when
-it stops handshaking (then restarts it), and restarts anything that died.
+re-pins the server when the gateway changes or the pinned route is gone, gives
+the exit (WARP, or the tunnel itself when it has a `PersistentKeepalive`) a new
+source port when it stops handshaking (then restarts it), and restarts anything
+that died. Every 5s it also looks for a network change (Wi-Fi rejoined, a new
+gateway) and runs those checks straight away, so a tunnel recovers in seconds.
 
 ### Files
 

@@ -54,8 +54,10 @@
 # to the normal connection. A split tunnel (no 0.0.0.0/0) runs without it.
 #
 # The daemon brings back the last `up` after a reboot and checks every 30s:
-# re-pins the server when the gateway changes, gives WARP a new source port when
-# it stops handshaking (then restarts it), and restarts anything that died.
+# re-pins the server when the gateway changes or its route is gone (checked
+# every 5s, so rejoining Wi-Fi recovers in seconds), gives the exit (WARP, or the
+# tunnel itself) a new source port when it stops handshaking, then restarts it,
+# and restarts anything that died.
 
 LABEL="com.local.wg-tunnels"
 INSTALLED="/usr/local/sbin/wg-tunnels"
@@ -82,6 +84,7 @@ EXPORTS="$HOME/wg-tunnels/exports"   # WireGuard app "Export Tunnels to Zip"
 CONFIGS="$HOME/wg-tunnels/config"    # every tunnel's .conf: what import installs
 WAIT_SECS=30
 WATCH_SECS=30
+NET_SECS=5      # how often to look for a network change (cheap: no wg calls)
 STALE_SECS=180
 V4_HALVES="0.0.0.0/1 128.0.0.0/1"
 V6_HALVES="::/1 8000::/1"
@@ -436,7 +439,7 @@ apply() {  # apply <request-id> — the desired state; progress ends with ok/fai
     local want name
     read -r want name 2>/dev/null < "$STATE/desired"
     put "$RUN/progress" "req $1"
-    WARP_STALE=0
+    STALE=0
     if [ "$want" = up ]; then
         if apply_up "$name"; then echo ok >> "$RUN/progress"; else echo fail >> "$RUN/progress"; fi
     else
@@ -446,7 +449,7 @@ apply() {  # apply <request-id> — the desired state; progress ends with ok/fai
 
 # Every $WATCH_SECS while up
 watchdog() {
-    local name iface kind exit_if ip pgw gw age
+    local name iface kind exit_if ip pgw gw cur age
     read -r want _ 2>/dev/null < "$STATE/desired"
     [ "$want" = up ] || return
     if ! read -r name iface kind exit_if 2>/dev/null < "$RUN/current"; then
@@ -458,25 +461,48 @@ watchdog() {
     if [ "$kind" != split ]; then
         read -r ip pgw 2>/dev/null < "$RUN/pin"
         gw=$(gateway)
+        cur=$(route -n get "$ip" 2>/dev/null | awk '/gateway:/ {print $2}')
         if [ -n "$gw" ] && [ "$gw" != "$pgw" ]; then
             log "watchdog: gateway ${pgw:-none} -> ${gw}, re-pinning ${ip}"
             pin "$ip"
+        elif [ -n "$gw" ] && [ "$cur" != "$gw" ]; then
+            # macOS drops routes through an interface that goes down: rejoining
+            # the same network leaves the gateway as it was, and the pin gone
+            log "watchdog: route to ${ip} gone (network came back), re-pinning"
+            pin "$ip"
         fi
     fi
-    if [ "$exit_if" = warp ]; then
-        age=$(hs_age warp)
+    # The exit's handshake: WARP, or the tunnel itself. Only with a keepalive,
+    # without one an idle tunnel has no handshakes either.
+    if grep -qi '^[[:space:]]*PersistentKeepalive' "$CONF/$exit_if.conf" 2>/dev/null; then
+        age=$(hs_age "$exit_if")
         if [ -z "$age" ] || [ "$age" -gt "$STALE_SECS" ]; then
-            WARP_STALE=$((WARP_STALE + 1))
-            if [ "$WARP_STALE" -eq 2 ]; then
-                log "watchdog: WARP silent ${age:-?}s — new source port"
-                wg set "$(utun_of warp)" listen-port 0
-            elif [ "$WARP_STALE" -ge 4 ]; then
-                log "watchdog: WARP still silent — restarting"; apply watchdog; return
+            STALE=$((STALE + 1))
+            if [ "$STALE" -eq 2 ]; then
+                log "watchdog: ${exit_if} silent ${age:-?}s — new source port"
+                wg set "$(utun_of "$exit_if")" listen-port 0
+            elif [ "$STALE" -ge 4 ]; then
+                log "watchdog: ${exit_if} still silent — restarting"; apply watchdog; return
             fi
         else
-            WARP_STALE=0
+            STALE=0
         fi
     fi
+}
+
+# Between watchdog runs: has the network changed (gateway appeared or moved,
+# or the pinned route went missing)? Then the watchdog runs now, not in 30s.
+net_changed() {
+    local gw ip pgw cur
+    gw=$(gateway)
+    if [ "$gw" != "$NET_GW" ]; then
+        NET_GW="$gw"
+        [ -n "$gw" ] && return 0
+    fi
+    [ -n "$gw" ] || return 1
+    read -r ip pgw 2>/dev/null < "$RUN/pin" || return 1
+    cur=$(route -n get "$ip" 2>/dev/null | awk '/gateway:/ {print $2}')
+    [ "$cur" != "$gw" ]
 }
 
 write_status() {
@@ -495,6 +521,7 @@ write_status() {
 
 cmd_daemon() {
     local req applied="" tick=0
+    NET_GW=$(gateway)
     need_root daemon
     mkdir -p "$RUN" "$STATE" && chmod 755 "$RUN" "$STATE"
     rm -f "$RUN/armed" "$RUN/current"   # routes don't survive a reboot; a restart re-applies
@@ -507,7 +534,8 @@ cmd_daemon() {
             log "applying: $(cat "$STATE/desired" 2>/dev/null || echo down) (${applied})"
             apply "$applied"
             tick=0
-        elif [ "$tick" -ge "$WATCH_SECS" ]; then
+        elif [ "$tick" -ge "$WATCH_SECS" ] \
+            || { [ $((tick % NET_SECS)) -eq 0 ] && net_changed; }; then
             watchdog
             tick=0
         fi
