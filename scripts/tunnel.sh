@@ -14,8 +14,10 @@
 #                           the newest zip in ~/wg-tunnels/exports (or the one
 #                           given): the zip is the authority, configs not in it
 #                           are removed. The zip is kept.
-#   tunnel.sh import [dir]  Install every .conf in ~/wg-tunnels/config (or dir)
+#   tunnel.sh import [dir] [-y]
+#                           Install every .conf in ~/wg-tunnels/config (or dir)
 #                           for the daemon. Tunnels gone from it are removed.
+#                           Shows what it would do and asks first (-y: don't ask).
 #   tunnel.sh extract-import
 #                           Both: extract, then import
 #   tunnel.sh install       Install /usr/local/sbin/wg-tunnels and its LaunchDaemon
@@ -201,20 +203,34 @@ resolve() {
     dscacheutil -q host -a name "$1" | awk '/^ip_address:/ {print $2; exit}'
 }
 
+# _import <dir> [dry]: dry reports what an import would do and changes nothing
 cmd_import_root() {
-    local src="$1" f name kind ep host ip iface out tmp state n wep active rows="" seen=""
+    local src="$1" dry="${2:-}" f name kind ep host ip iface out tmp state n wep active rows="" seen=""
     need_root import
     [ -d "$src" ] || die "No folder ${src}"
-    mkdir -p "$CONF" "$STATE" && chmod 700 "$CONF" && chmod 755 "$ETC" "$STATE"
-    touch "$TSV"
+    if [ -z "$dry" ]; then
+        mkdir -p "$CONF" "$STATE" && chmod 700 "$CONF" && chmod 755 "$ETC" "$STATE"
+        touch "$TSV"
+    fi
+    # A temp file next to its target (same filesystem, for mv), or anywhere when dry
+    tmpfile() { if [ -n "$dry" ]; then mktemp -t wgt-import; else mktemp "$CONF/.$1.XXXXXX"; fi; }
+    # new / updated / unchanged for $1 against $2; moves it into place unless dry
+    settle() {
+        chmod 600 "$1"
+        if [ -f "$2" ] && cmp -s "$1" "$2"; then rm -f "$1"; echo unchanged; return; fi
+        [ -f "$2" ] && echo updated || echo new
+        if [ -n "$dry" ]; then rm -f "$1"; else mv -f "$1" "$2"; fi
+    }
 
     [ -f "$WARP_SRC" ] || die "No ${WARP_SRC} — run install.sh"
     wep=$(conf_val "$WARP_SRC" Endpoint | host_of)
-    tmp=$(mktemp "$CONF/.warp.XXXXXX")
-    render_warp "$WARP_SRC" > "$tmp" && chmod 600 "$tmp" && mv -f "$tmp" "$CONF/warp.conf"
+    tmp=$(tmpfile warp)
+    render_warp "$WARP_SRC" > "$tmp"
+    state=$(settle "$tmp" "$CONF/warp.conf")
 
     active=$(awk '$1 == "name" {print $2}' "$RUN/status" 2>/dev/null)
     printf '%-28s %-7s %-6s %s\n' TUNNEL KIND IFACE FILE
+    printf '%-28s %-7s %-6s %s\n' "(WARP)" - - "$state"
     for f in "$src"/*.conf; do
         [ -f "$f" ] || continue
         name=$(basename "$f" .conf)
@@ -231,10 +247,10 @@ cmd_import_root() {
             continue
         fi
         # Keep a tunnel's interface name across imports; new ones get the next free wtN
-        iface=$(awk -F'\t' -v n="$name" '$1 == n {print $2; exit}' "$TSV")
+        iface=$(awk -F'\t' -v n="$name" '$1 == n {print $2; exit}' "$TSV" 2>/dev/null)
         if [ -z "$iface" ]; then
             n=0
-            while awk -F'\t' '{print $2}' "$TSV" | grep -qx "wt$n" || [[ " $seen " == *" wt$n "* ]]; do
+            while awk -F'\t' '{print $2}' "$TSV" 2>/dev/null | grep -qx "wt$n" || [[ " $seen " == *" wt$n "* ]]; do
                 n=$((n + 1))
             done
             iface="wt$n"
@@ -242,15 +258,9 @@ cmd_import_root() {
         seen+=" $iface"
 
         out="$CONF/$iface.conf"
-        tmp=$(mktemp "$CONF/.import.XXXXXX")
+        tmp=$(tmpfile import)
         render "$f" "$kind" "$wep" "$ip" > "$tmp"
-        chmod 600 "$tmp"
-        if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
-            rm -f "$tmp"; state=unchanged
-        else
-            [ -f "$out" ] && state=updated || state=new
-            mv -f "$tmp" "$out"
-        fi
+        state=$(settle "$tmp" "$out")
         [ "$name" = "$active" ] && [ "$state" = updated ] && state="updated (up now: re-run tunnel.sh up)"
         rows+="${name}"$'\t'"${iface}"$'\t'"${kind}"$'\t'"${ip}"$'\n'
         printf '%-28s %-7s %-6s %s\n' "$name" "$kind" "$iface" "$state"
@@ -264,12 +274,12 @@ cmd_import_root() {
             rows+="${name}"$'\t'"${iface}"$'\t'"${kind}"$'\t'"${ip}"$'\n'
             printf '%-28s %-7s %-6s %s\n' "$name" "$kind" "$iface" "kept: up now (tunnel.sh down, then import again)"
         else
-            rm -f "$CONF/$iface.conf"
+            [ -n "$dry" ] || rm -f "$CONF/$iface.conf"
             printf '%-28s %-7s %-6s %s\n' "$name" "$kind" "$iface" "removed"
         fi
-    done < "$TSV"
+    done < <(cat "$TSV" 2>/dev/null)
 
-    put "$TSV" "$(printf '%s' "$rows" | sort -f -t$'\t' -k1,1)" 644
+    [ -n "$dry" ] || put "$TSV" "$(printf '%s' "$rows" | sort -f -t$'\t' -k1,1)" 644
 }
 
 # --- routes (root, daemon) ---
@@ -898,7 +908,7 @@ cmd_rotate_warp() {
     fi
 
     echo "== Import"
-    cmd_import || die "rotate-warp: import failed. The new account is in place: run tunnel.sh import, then delete ${old}"
+    cmd_import -y || die "rotate-warp: import failed. The new account is in place: run tunnel.sh import, then delete ${old}"
     rm -rf "$old"
     echo "Old WARP account deleted"
 
@@ -1001,12 +1011,27 @@ cmd_extract() {
 
 # import [dir]: install every .conf in ~/wg-tunnels/config (or dir) for the
 # daemon. Tunnels no longer there are removed (unless up right now).
+# import [dir] [-y]: shows what it would do and asks first; -y, or no terminal
+# (the menu bar), goes ahead without asking
 cmd_import() {
-    local src="${1:-$CONFIGS}" f n=0
+    local src="" yes="" a f n=0 answer
+    for a in "$@"; do
+        case "$a" in -y|--yes) yes=1 ;; "") ;; *) src="$a" ;; esac
+    done
+    src="${src:-$CONFIGS}"
     check_installed
     [ -d "$src" ] || die "No folder ${src} — tunnel.sh extract (from an export zip), or put .conf files there"
     for f in "$src"/*.conf; do [ -f "$f" ] && n=$((n + 1)); done
     [ "$n" -gt 0 ] || die "No .conf files in ${src} — tunnel.sh extract (from an export zip), or put them there"
+    if [ -z "$yes" ] && [ -t 0 ]; then
+        echo "Import from ${src} would do:"
+        # The repo copy, dry: changes nothing, and doesn't update the daemon yet
+        if [ -n "$WGT_TEST" ]; then "$0" _import "$src" dry; else sudo "$0" _import "$src" dry; fi || return 1
+        echo
+        read -rp "Go ahead? [y/N] " answer
+        [[ "$answer" =~ ^[Yy] ]] || { echo "Nothing changed"; return 1; }
+        echo
+    fi
     echo "Importing from ${src}"
     if [ -n "$WGT_TEST" ]; then "$0" _import "$src"; else root _import "$src"; fi
 }
@@ -1014,10 +1039,10 @@ cmd_import() {
 case "${1:-status}" in
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
-    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] | extract-import | install | uninstall | rotate-warp | log | breakglass" ;;
+    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | install | uninstall | rotate-warp | log | breakglass" ;;
     list)      echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other ;;
     extract)   cmd_extract "$2" ;;
-    import)    cmd_import "$2" ;;
+    import)    shift; cmd_import "$@" ;;
     extract-import) cmd_extract "$2" && cmd_import ;;
     rotate-warp) cmd_rotate_warp ;;
     install)   sudo "$0" _install "$0" ;;
@@ -1026,9 +1051,9 @@ case "${1:-status}" in
     breakglass) cmd_breakglass ;;
     daemon)    cmd_daemon ;;
     request)   cmd_request "$2" "$3" ;;
-    _import)   cmd_import_root "$2" ;;
+    _import)   cmd_import_root "$2" "$3" ;;
     _install)  cmd_install_root "$2" ;;
     _uninstall) cmd_uninstall_root ;;
     _breakglass) cmd_breakglass_root ;;
-    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] | extract-import | install | uninstall | rotate-warp | log | breakglass" >&2; exit 1 ;;
+    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | install | uninstall | rotate-warp | log | breakglass" >&2; exit 1 ;;
 esac

@@ -171,7 +171,7 @@ alias wgwarp-sweep=~/Documents/code/wireguard-tunnels/scripts/wgwarp-sweep.sh
 | `down` | Everything down, back to the normal connection |
 | `status` (default) | Tunnels, what's up, handshakes, the kill switch, the exit IP |
 | `list` | Number the warped and other tunnels |
-| `import [dir]` | Install every `.conf` in `~/wg-tunnels/config` (or `dir`) for the daemon and work out each one's kind. Tunnels no longer there are removed, unless up right now |
+| `import [dir] [-y]` | Install every `.conf` in `~/wg-tunnels/config` (or `dir`) for the daemon and work out each one's kind. Tunnels no longer there are removed, unless up right now. First shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y` skips the question |
 | `extract [zip]` | Replace `~/wg-tunnels/config` with the `.conf` files in the newest zip in `~/wg-tunnels/exports` (or the one given). The zip is the authority: configs not in it are removed. The zip is kept |
 | `extract-import` | `extract`, then `import` |
 | `rotate-warp` | New Cloudflare WARP keys: registers a new WARP account (through `install.sh`), imports it, and reconnects a warped tunnel that's up. The old account is deleted once that works, or put back if registering fails |
