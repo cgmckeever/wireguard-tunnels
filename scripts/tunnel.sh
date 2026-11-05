@@ -366,6 +366,8 @@ unpin() {
 # pipe: wg-quick leaves its route monitor and wireguard-go holding the pipe open.
 wgq() {
     local out rc
+    # Before up and after down nothing live is <iface>: any monitor left is stale
+    [ "$1" = up ] && reap_monitors "$2"
     out=$(mktemp "$RUN/.wgq.XXXXXX")
     wg-quick "$1" "$CONF/$2.conf" > "$out" 2>&1
     rc=$?
@@ -373,7 +375,23 @@ wgq() {
     grep -v 'networksetup -' "$out" \
         | sed -E "s/[A-Za-z0-9+/]{42,43}=?/<key>/g; s/^/  [$2] /"
     rm -f "$out"
+    [ "$1" = down ] && reap_monitors "$2"
     return "$rc"
+}
+
+# wg-quick leaves a route monitor behind each up; it quits on a route change
+# once its utun is gone. A quick restart reuses the utun name, so it never sees
+# it gone and lingers. SIGKILL, parent first: its exit trap (also run when its
+# route -n monitor child dies) deletes every route through that utun name,
+# which by then can be the live tunnel's.
+reap_monitors() {  # reap_monitors <iface>
+    local pid kids n=0
+    for pid in $(pgrep -f "wg-quick up $CONF/$1\\.conf\$"); do
+        kids=$(pgrep -P "$pid")
+        kill -9 "$pid" 2>/dev/null && n=$((n + 1))
+        [ -n "$kids" ] && kill -9 $kids 2>/dev/null
+    done
+    [ "$n" -eq 0 ] || log "removed ${n} stale wg-quick monitor(s) for ${1}"
 }
 
 # --- daemon ---
