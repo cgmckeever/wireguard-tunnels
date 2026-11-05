@@ -307,6 +307,22 @@ del_routes() {
 
 warp_ep() { conf_val "$CONF/warp.conf" Endpoint | host_of; }
 
+if_mtu() { ifconfig "$1" 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "mtu") {print $(i + 1); exit}}'; }
+
+# WARP's packets travel inside the carrier, up to 80 bytes bigger (IPv6 40 +
+# UDP 8 + WireGuard 32). A carrier with a small MTU (a server set to 1280, say)
+# needs WARP smaller still, or full-size packets are dropped: ping works,
+# nothing else does. Uses the carrier's live MTU, so wg-quick's own choice
+# (no MTU line) counts too. warp.conf itself isn't changed.
+fit_warp_mtu() {  # fit_warp_mtu <carrier iface> <name>
+    local cm wm
+    cm=$(if_mtu "$(utun_of "$1")")
+    wm=$(if_mtu "$(utun_of warp)")
+    [ -n "$cm" ] && [ -n "$wm" ] && [ $((cm - 80)) -lt "$wm" ] || return 0
+    ifconfig "$(utun_of warp)" mtu $((cm - 80)) \
+        && log "WARP MTU $((cm - 80)), inside ${2} (MTU ${cm})"
+}
+
 # /31 around the WARP endpoint (more specific than the /2s, less than the carrier's /32)
 warp_guard() {
     local ep a b c d
@@ -427,6 +443,7 @@ apply_up() {
             || { progress "fail: WARP endpoint doesn't route into ${iface}"; return 1; }
         progress "starting WARP inside ${name}"
         wgq up warp || { progress "fail: wg-quick up warp"; return 1; }
+        fit_warp_mtu "$iface" "$name"
         exit_if=warp
     fi
     [ "$kind" = split ] || take_traffic "$exit_if"

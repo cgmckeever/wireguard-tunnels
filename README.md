@@ -213,6 +213,13 @@ The WARP side is `$(brew --prefix)/etc/wireguard/warp.conf`, written by
 `install.sh`. Don't bring it up on its own; the daemon starts it inside the
 carrier.
 
+WARP's packets get up to 80 bytes bigger inside the carrier, so a carrier with
+an MTU under 1360 (a server set to 1280, say) can't fit WARP's 1280: ping
+works and nothing else does. The daemon handles it: when the carrier's MTU is
+under 1360 it runs WARP at the carrier's MTU minus 80 (1200 inside a 1280
+carrier) and logs it. Below 1280 there's no IPv6 inside WARP and QUIC falls
+back to TCP; pages still load. The sweep flags these carriers.
+
 ## Menu bar (optional)
 
 `install.sh --swiftbar` adds a lock to the menu bar through

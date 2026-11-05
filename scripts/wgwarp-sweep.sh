@@ -101,6 +101,11 @@ for raw in "${raws[@]}"; do
     fi
 
     printf '%-28s %-10s %s\n' "$name" "$state" "$(app_action "$name" "$(endpoint_of "$out")" "$state")"
+    # A small carrier MTU: the daemon runs WARP 80 smaller inside it (tunnel.sh)
+    mtu=$(sed -nE 's/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$out" | head -1)
+    if [ -n "$mtu" ] && [ "$mtu" -lt 1360 ]; then
+        printf '%-28s %s\n' "" "└ carrier MTU ${mtu}: WARP runs at $((mtu - 80)) inside (IPv6 and QUIC fall back)"
+    fi
 done
 
 # config/ files with no carriers/ source: a WARP-pinned one lost its source
