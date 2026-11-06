@@ -212,14 +212,17 @@ endpoint is in `AllowedIPs`, nothing wider than a /8, no `DNS`), skipping one
 that isn't swept rather than fixing it.
 
 **Reaching the server through the carrier.** A carrier carries only WARP, so
-the server can't reach your Mac at its tunnel address (or the Mac reach the
-server's) unless that address is in `AllowedIPs` too. The sweep adds every
-address on these header lines of the carrier file:
+the server can't reach your Mac (or the Mac reach the server) unless the
+address is in `AllowedIPs` too. The sweep adds every address on these header
+lines of the carrier file:
 
 ```ini
-# server-address: 192.168.250.1/32, fdaa:8f8:c196::1/128   # written by wireguard-tools
-# wg-tunnels: also 10.0.0.5/32                              # your own
+# device-network: 10.9.8.0/24     # written by wireguard-tools
+# wg-tunnels: also 10.0.0.5/32    # your own
 ```
+
+`device-network` is wireguard-tools' static device addresses: `10.9.8.1` is
+the server and `10.9.8.<number>` a device, whichever config it's using.
 
 They're rebuilt on every sweep, so deleting a line and sweeping again removes
 them. Anything wider than a /8 (/16 for IPv6) is ignored and reported, since

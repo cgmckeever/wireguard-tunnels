@@ -8,7 +8,7 @@
 # Reads every ~/wg-tunnels/carriers/<name>.conf (as downloaded from the
 # provider, named however you like) and writes
 # ~/wg-tunnels/config/warped.<name>.conf with AllowedIPs set to the WARP
-# endpoint (plus the server's own tunnel address, see extras below), the DNS
+# endpoint (plus the addresses to reach the server by, see extras below), the DNS
 # line removed and a keepalive, so the tunnel carries WARP and nothing else.
 # Everything WARP-specific about a carrier is done here; import only checks it. The warped. prefix is how `tunnel.sh import` knows a tunnel carries
 # WARP (a carrier already named warped.* or warped-* isn't prefixed twice).
@@ -38,15 +38,15 @@ valid() {
 }
 
 # A carrier's AllowedIPs beyond the WARP endpoint, from its header comments:
-#   # server-address: 192.168.250.1/32, fdaa:8f8:c196::1/128   (wireguard-tools writes this)
-#   # wg-tunnels: also 10.0.0.5/32                              (add your own)
-# The server's own tunnel address lets it reach the Mac (and the Mac reach it)
-# through the carrier. Rebuilt every sweep: delete a line and it's gone.
+#   # device-network: 10.9.8.0/24     (wireguard-tools writes this)
+#   # wg-tunnels: also 10.0.0.5/32    (add your own)
+# wireguard-tools' static device addresses let the server and the Mac reach each
+# other through the carrier. Rebuilt every sweep: delete a line and it's gone.
 # extras <conf> narrow|wide: the entries a carrier may have, or the ones refused
 # (wider than /8, or /16 for IPv6: those would take traffic away from WARP)
 extras() {
     local e p
-    sed -nE 's/^#[[:space:]]*(server-address:|wg-tunnels:[[:space:]]*also)[[:space:]]*//p' "$1" \
+    sed -nE 's/^#[[:space:]]*(device-network:|wg-tunnels:[[:space:]]*also)[[:space:]]*//p' "$1" \
         | tr ', \t\r' '\n\n\n\n' | grep . | while read -r e; do
             p="${e#*/}"; [ "$p" = "$e" ] && p=128
             case "$e" in *:*) min=16 ;; *) min=8; [ "$p" = 128 ] && p=32 ;; esac
