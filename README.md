@@ -276,7 +276,7 @@ so the WARP endpoints have no keepalive: only the one in use talks to
 Cloudflare.
 
 The profile: each carrier is an endpoint carrying WARP and nothing else (the
-`server-address` and `also` extras are left out: nothing on the server needs
+`device-network` and `also` extras are left out: nothing on the server needs
 to reach the device); each `warped.<carrier>` is WARP detoured through it, at
 the carrier's MTU minus 80; a `tunnel` selector lists them (the picker in the
 app, which switches without dropping the VPN). DNS goes to 1.1.1.1 through
