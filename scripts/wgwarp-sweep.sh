@@ -3,7 +3,10 @@
 # Any WireGuard server works as the carrier.
 #
 # Usage:
-#   wgwarp-sweep.sh
+#   wgwarp-sweep.sh                  this Mac: ~/wg-tunnels/carriers -> config
+#   wgwarp-sweep.sh --sing-box <device>   a sing-box device: ~/wg-tunnels/sing-box/<device>/carriers
+#                                         -> config (no WireGuard app column, no extras;
+#                                         singbox.sh build runs it)
 #
 # Reads every ~/wg-tunnels/carriers/<name>.conf (as downloaded from the
 # provider, named however you like) and writes
@@ -22,6 +25,16 @@
 # (default 162.159.192.1, engage.cloudflareclient.com).
 
 TUNNELS_DIR="${TUNNELS_DIR:-$HOME/wg-tunnels}"
+DEVICE=""
+case "$1" in
+    "") ;;
+    --sing-box)
+        DEVICE="$2"
+        [[ "$DEVICE" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Usage: wgwarp-sweep.sh [--sing-box <device>]" >&2; exit 1; }
+        TUNNELS_DIR="$TUNNELS_DIR/sing-box/$DEVICE"
+        [ -d "$TUNNELS_DIR" ] || { echo "No sing-box device $DEVICE (singbox.sh new $DEVICE)" >&2; exit 1; } ;;
+    *) echo "Usage: wgwarp-sweep.sh [--sing-box <device>]" >&2; exit 1 ;;
+esac
 CARRIER_DIR="$TUNNELS_DIR/carriers"
 CONFIG_DIR="$TUNNELS_DIR/config"
 WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1}"
@@ -43,9 +56,11 @@ valid() {
 # wireguard-tools' static device addresses let the server and the Mac reach each
 # other through the carrier. Rebuilt every sweep: delete a line and it's gone.
 # extras <conf> narrow|wide: the entries a carrier may have, or the ones refused
-# (wider than /8, or /16 for IPv6: those would take traffic away from WARP)
+# (wider than /8, or /16 for IPv6: those would take traffic away from WARP).
+# None for a sing-box device: nothing on the server needs to reach it, so it carries WARP only.
 extras() {
     local e p
+    [ -n "$DEVICE" ] && return
     sed -nE 's/^#[[:space:]]*(device-network:|wg-tunnels:[[:space:]]*also)[[:space:]]*//p' "$1" \
         | tr ', \t\r' '\n\n\n\n' | grep . | while read -r e; do
             p="${e#*/}"; [ "$p" = "$e" ] && p=128
@@ -101,6 +116,9 @@ app_action() {
     fi
 }
 
+# A sing-box device's tunnels: this Mac's WireGuard app has nothing to do with them
+if [ -n "$DEVICE" ]; then app_action() { :; }; fi
+
 shopt -s nullglob
 raws=("$CARRIER_DIR"/*.conf)
 if [ ${#raws[@]} -eq 0 ]; then
@@ -108,7 +126,8 @@ if [ ${#raws[@]} -eq 0 ]; then
     echo
 fi
 
-printf '%-28s %-10s %s\n' "TUNNEL" "FILE" "WIREGUARD APP (only if you use it)"
+app_col="WIREGUARD APP (only if you use it)"; [ -n "$DEVICE" ] && app_col=""
+printf '%-28s %-10s %s\n' "TUNNEL" "FILE" "$app_col"
 for raw in "${raws[@]}"; do
     name="warped.$(basename "$raw" .conf | sed -E 's/^warped[.-]//')"
     out="$CONFIG_DIR/${name}.conf"
@@ -156,6 +175,7 @@ for out in "$CONFIG_DIR"/*.conf; do
     fi
 done
 
+[ -n "$DEVICE" ] && exit 0
 echo
 echo "Next: tunnel.sh import   (installs everything in ${CONFIG_DIR} for the daemon)"
 echo "The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise."

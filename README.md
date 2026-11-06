@@ -117,6 +117,7 @@ Run them by their path (see [Quick start](#quick-start)):
 | `install.sh` | Sets everything up: prerequisites, your folders, WARP, the daemon; `--swiftbar` for the menu bar. Safe to re-run |
 | `scripts/tunnel.sh` | The command you use day to day: `up`, `down`, `status`, `import`… ([Commands](#tunnelsh)). Installed as the daemon too |
 | `scripts/wgwarp-sweep.sh` | Turns carrier configs into warped ones ([Warped tunnels](#warped-tunnels)) |
+| `scripts/singbox.sh` | Warped tunnels for an iPhone, Apple TV or other sing-box device ([sing-box devices](#sing-box-devices)) |
 | `scripts/askpass.sh` | Password dialog for `sudo -A`, used by the menu bar; not run by hand |
 | `scripts/swiftbar/tunnel-status.5s.sh` | The SwiftBar plugin; `install.sh --swiftbar` links it in |
 
@@ -130,6 +131,7 @@ Run them by their path (see [Quick start](#quick-start)):
 | `carriers/` | WireGuard configs to wrap WARP inside, as downloaded from your provider or server. `wgwarp-sweep.sh` turns each into `config/warped.<name>.conf`. Only needed for warped tunnels |
 | `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*. `tunnel.sh extract` replaces `config/` with the newest one. Only needed if you use the app; zips are kept |
 | `warp/` | Your Cloudflare WARP account (`wgcf-account.toml`) and profile (`wgcf-profile.conf`), made by `install.sh`. One per Mac; `warp.conf` is built from it |
+| `sing-box/<device>/` | A sing-box device's own `carriers/`, `warp/` and `config/`, made by `singbox.sh new` ([sing-box devices](#sing-box-devices)) |
 
 ## Quick start
 
@@ -187,8 +189,11 @@ differs.
 
 ### wgwarp-sweep.sh
 
-`~/Documents/code/wireguard-tunnels/scripts/wgwarp-sweep.sh` (no arguments) turns
-carrier configs into warped ones; see [Warped tunnels](#warped-tunnels).
+`~/Documents/code/wireguard-tunnels/scripts/wgwarp-sweep.sh` turns carrier
+configs into warped ones; see [Warped tunnels](#warped-tunnels). With
+`--sing-box <device>` it sweeps `sing-box/<device>/` instead, without the
+WireGuard app column or the carrier extras ([sing-box devices](#sing-box-devices);
+`singbox.sh build` runs it).
 
 | Env | Default |
 |-----|---------|
@@ -240,6 +245,52 @@ works and nothing else does. The daemon handles it: when the carrier's MTU is
 under 1360 it runs WARP at the carrier's MTU minus 80 (1200 inside a 1280
 carrier) and logs it. Below 1280 there's no IPv6 inside WARP and QUIC falls
 back to TCP; pages still load. The sweep flags these carriers.
+
+## sing-box devices
+
+An iPhone, iPad, Apple TV or Android box can't run the daemon, and the
+WireGuard app there can't carry one tunnel inside another.
+[sing-box](https://sing-box.sagernet.org) (App Store: *sing-box VT*) can: a
+WireGuard endpoint with a `detour` sends its packets through another one, so
+WARP rides inside the carrier in a single VPN. `scripts/singbox.sh` builds
+that profile, one folder per device. A plain tunnel (say your own server, no
+WARP) needs none of this: give the device a peer in the WireGuard app.
+
+```sh
+scripts/singbox.sh new iphone      # ~/wg-tunnels/sing-box/iphone/ + its own WARP account
+# put the device's carrier configs in ~/wg-tunnels/sing-box/iphone/carriers/
+scripts/singbox.sh build iphone    # sweep them, write config/sing-box.json
+scripts/singbox.sh list
+```
+
+| Folder | What |
+|--------|------|
+| `carriers/` | The device's own carrier configs, e.g. Proton (account.proton.me → Downloads → WireGuard configuration, a new one named for the device) |
+| `warp/` | The device's own wgcf WARP account, made by `singbox.sh new` |
+| `config/` | What `build` writes: `warped.<carrier>.conf` (`wgwarp-sweep.sh --sing-box`) and `sing-box.json`. A carrier taken out of `carriers/` leaves the profile at the next `build`; its `warped` file stays until you delete it |
+
+Keys are the device's own, never the Mac's or another device's: two devices
+on one WireGuard key knock each other off whenever both are up, and a lost
+device is revoked alone. Every carrier on a device shares its one WARP key,
+so the WARP endpoints have no keepalive: only the one in use talks to
+Cloudflare.
+
+The profile: each carrier is an endpoint carrying WARP and nothing else (the
+`server-address` and `also` extras are left out: nothing on the server needs
+to reach the device); each `warped.<carrier>` is WARP detoured through it, at
+the carrier's MTU minus 80; a `tunnel` selector lists them (the picker in the
+app, which switches without dropping the VPN). DNS goes to 1.1.1.1 through
+the tunnel, and `strict_route` keeps traffic in the VPN, the nearest sing-box
+gets to the kill switch. When `sing-box` is installed on the Mac, `build` runs
+`sing-box check` on it.
+
+WARP doesn't choose the region: it exits at the Cloudflare location nearest
+the carrier's exit. For regional streaming a plain carrier is usually the
+better pick, since some services flag WARP addresses.
+
+Get `sing-box.json` to the device by AirDrop or iCloud Drive and import it in
+sing-box (Profiles → New Profile → Import). It holds private keys: delete
+the copy afterwards.
 
 ## Menu bar (optional)
 
