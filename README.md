@@ -52,7 +52,7 @@ The same configs and folders serve two kinds of device:
 | Runs the tunnels | A root daemon (`wg-quick` under launchd) | The [sing-box](https://sing-box.sagernet.org) app |
 | You manage it with | `tunnel.sh` and the menu bar | `singbox.sh` on the Mac, then import in the app |
 | Kill switch | Yes: nothing leaves outside a tunnel, even if it fails | Only while the app runs (`strict_route`) |
-| Start at | [Install](#install), then [Quick start](#quick-start) | [sing-box devices](#sing-box-devices) |
+| Start at | [Install the management tools](#install-the-management-tools), then [Quick start](#quick-start) | [sing-box devices](#sing-box-devices) |
 
 **This Mac: the scripts and the menu bar.** The WireGuard app's tunnels belong
 to one macOS user and stop passing traffic after a user switch. Here a root
@@ -90,14 +90,14 @@ Terms used throughout:
 Contents:
 
 - [What it does](#what-it-does) and [Two ways to run it](#two-ways-to-run-it)
-- This Mac: [Install](#install) · [Quick start](#quick-start) ·
+- This Mac: [Install the management tools](#install-the-management-tools) · [Quick start](#quick-start) ·
   [Commands](#commands) · [Warped tunnels](#warped-tunnels) ·
   [Menu bar](#menu-bar-optional) · [Troubleshooting](#troubleshooting) ·
   [How it works](#how-it-works)
 - Phones, tablets, Apple TV: [sing-box devices](#sing-box-devices)
 - [Uninstall](#uninstall)
 
-## Install
+## Install the management tools
 
 `install.sh` sets up everything on this Mac: packages, your folders, a WARP
 account and the daemon. It needs macOS, [Homebrew](https://brew.sh) and an
@@ -272,7 +272,7 @@ if you keep one there.
 
 Given a device (`wgwarp-sweep.sh iphone`) or a folder with a `carriers/` in
 it, it sweeps that one instead, with no WireGuard app advice. `singbox.sh
-build` runs it this way. It reads `WARP_ENDPOINT` ([Install](#install)).
+build` runs it this way. It reads `WARP_ENDPOINT`, as [install.sh](#install-the-management-tools) does.
 
 ### singbox.sh
 
@@ -284,7 +284,7 @@ build` runs it this way. It reads `WARP_ENDPOINT` ([Install](#install)).
 | `build <device>` | Sweep its carriers, then write its profiles into its `sing-box/` (needs `jq`: `brew install jq`). Works for this Mac too ([sing-box on this Mac](#sing-box-on-this-mac)) |
 | `list` | Each device's carriers, tunnels and profiles, whether it has a WARP account, and which is this Mac |
 
-It reads `WARP_ENDPOINT` ([Install](#install)).
+It reads `WARP_ENDPOINT`, as [install.sh](#install-the-management-tools) does.
 
 ## Warped tunnels
 
