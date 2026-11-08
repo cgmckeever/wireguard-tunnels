@@ -34,7 +34,7 @@
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
 #                 without --sing-box to add Local Mac Tunnels later
 #
-# The WARP endpoint comes from ~/wg-tunnels/warp-endpoint (IPv4:port; default
+# The WARP endpoint comes from ~/wg-tunnels/.warp-endpoint (IPv4:port; default
 # 162.159.192.1:2408).
 
 set -u
@@ -84,12 +84,12 @@ if [ "$opts" = 0 ] && [ -t 0 ] && [ ! -f "$DEFAULT_FILE" ]; then
 fi
 [ "$singbox_only" = 0 ] || { [ "$swiftbar" = 0 ] && [ "$daemon" = 1 ]; } \
     || die "--sing-box takes only --device: it sets up no Local Mac Tunnels"
-# The WARP endpoint: ~/wg-tunnels/warp-endpoint (one line, IPv4:port), else
+# The WARP endpoint: ~/wg-tunnels/.warp-endpoint (one line, IPv4:port), else
 # Cloudflare's default. A file, not a variable, so the menu bar sees it too.
 WARP_ENDPOINT=162.159.192.1:2408
-[ -f "$TUNNELS_DIR/warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$TUNNELS_DIR/warp-endpoint")
+[ -f "$TUNNELS_DIR/.warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$TUNNELS_DIR/.warp-endpoint")
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
-    || die "~/wg-tunnels/warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
+    || die "~/wg-tunnels/.warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
 [ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
 
 echo "== Homebrew"

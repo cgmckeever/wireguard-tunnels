@@ -29,7 +29,7 @@
 # it for this Mac with SWEEP_NO_NEXT=1 (no "Next: tunnel.sh import" line).
 # Neither needs it run by hand.
 #
-# The WARP endpoint comes from ~/wg-tunnels/warp-endpoint (IPv4:port; default
+# The WARP endpoint comes from ~/wg-tunnels/.warp-endpoint (IPv4:port; default
 # 162.159.192.1:2408; only the address is used here).
 
 die() { echo "wgwarp-sweep.sh: $*" >&2; exit 1; }
@@ -55,12 +55,12 @@ APP=""
     && [ "$(cd "$DIR" && pwd -P)" = "$(cd "$TUNNELS/$MAC" && pwd -P)" ] && APP=1
 CARRIER_DIR="$DIR/carriers"
 CONFIG_DIR="$DIR/config"
-# The WARP endpoint: ~/wg-tunnels/warp-endpoint (one line, IPv4:port), else
+# The WARP endpoint: ~/wg-tunnels/.warp-endpoint (one line, IPv4:port), else
 # Cloudflare's default. A file, not a variable, so the menu bar sees it too.
 WARP_ENDPOINT=162.159.192.1:2408
-[ -f "$HOME/wg-tunnels/warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$HOME/wg-tunnels/warp-endpoint")
+[ -f "$HOME/wg-tunnels/.warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$HOME/wg-tunnels/.warp-endpoint")
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
-    || die "~/wg-tunnels/warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
+    || die "~/wg-tunnels/.warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
 WARP_NET="${WARP_ENDPOINT%:*}/32"
 
 # These hold private keys

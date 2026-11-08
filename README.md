@@ -232,7 +232,7 @@ back to TCP; pages still load.
 
 ### WARP endpoint
 
-WARP connects to `162.159.192.1:2408` unless `~/wg-tunnels/warp-endpoint`
+WARP connects to `162.159.192.1:2408` unless `~/wg-tunnels/.warp-endpoint`
 says otherwise: one line, IPv4 `address:port`, for every device. The sweep
 writes it into each warped tunnel, so a device's warped tunnels and its WARP
 side must agree. To change it, edit the file, then redo each setup: on this
