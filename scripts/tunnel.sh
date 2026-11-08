@@ -126,28 +126,11 @@ devices() {
     done
 }
 
-# old_layout: stop on a layout from before ~/wg-tunnels/devices/ (nothing is
-# moved for you). The same function is in singbox.sh, wgwarp-sweep.sh and install.sh.
-old_layout() {
-    local top="$HOME/wg-tunnels" d
-    for d in carriers config exports warp; do
-        [ -e "$top/$d" ] && die "$top/$d is an old layout: this Mac's folders go in $top/devices/<this Mac's name, e.g. mbp-1>. Move it first:
-  mkdir -p $top/devices/<name> && mv $top/$d $top/devices/<name>/"
-    done
-    [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
-    die "$top has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
-  mkdir -p $top/devices
-  mv $top/local $top/devices/<this Mac's name, e.g. mbp-1>
-  mv $top/sing-box/* $top/devices/ && rmdir $top/sing-box
-  (and in each device folder: mv profiles sing-box)"
-}
-
 # default [device]: show or pick this Mac's device folder, saved in
 # ~/wg-tunnels/devices/.default. Changing it leaves the daemon's tunnels alone.
 cmd_default() {
     local cur pick answer i devs=()
     cur=$(cat "$DEFAULT_FILE" 2>/dev/null)
-    old_layout
     while read -r i; do devs+=("$i"); done < <(devices)
     pick="$1"
     if [ -z "$pick" ]; then
@@ -179,7 +162,6 @@ cmd_default() {
 # mac_dir: this Mac's device folder (asks for it the first time, in a terminal)
 mac_dir() {
     local dev
-    old_layout
     dev=$(cat "$DEFAULT_FILE" 2>/dev/null)
     if [ -z "$dev" ]; then
         [ -t 0 ] || die "No default device yet: run tunnel.sh default in a terminal"

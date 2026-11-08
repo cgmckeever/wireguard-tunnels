@@ -29,26 +29,10 @@
 # it for this Mac with SWEEP_NO_NEXT=1 (no "Next: tunnel.sh import" line).
 # Neither needs it run by hand.
 #
-# Override the WARP endpoint with WARP_ENDPOINT (IPv4:port, default
+# The WARP endpoint comes from ~/wg-tunnels/warp-endpoint (IPv4:port; default
 # 162.159.192.1:2408; only the address is used here).
 
 die() { echo "wgwarp-sweep.sh: $*" >&2; exit 1; }
-
-# old_layout: stop on a layout from before ~/wg-tunnels/devices/ (nothing is
-# moved for you). The same function is in tunnel.sh, singbox.sh and install.sh.
-old_layout() {
-    local top="$HOME/wg-tunnels" d
-    for d in carriers config exports warp; do
-        [ -e "$top/$d" ] && die "$top/$d is an old layout: this Mac's folders go in $top/devices/<this Mac's name, e.g. mbp-1>. Move it first:
-  mkdir -p $top/devices/<name> && mv $top/$d $top/devices/<name>/"
-    done
-    [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
-    die "$top has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
-  mkdir -p $top/devices
-  mv $top/local $top/devices/<this Mac's name, e.g. mbp-1>
-  mv $top/sing-box/* $top/devices/ && rmdir $top/sing-box
-  (and in each device folder: mv profiles sing-box)"
-}
 
 TUNNELS="$HOME/wg-tunnels/devices"
 MAC=$(cat "$TUNNELS/.default" 2>/dev/null)     # this Mac's device (tunnel.sh default)
@@ -56,8 +40,7 @@ MAC=$(cat "$TUNNELS/.default" 2>/dev/null)     # this Mac's device (tunnel.sh de
 case "$1" in
     -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) die "usage: wgwarp-sweep.sh [<device>|<dir>]" ;;
-    "") old_layout
-        [ -n "$MAC" ] || die "no default device yet: tunnel.sh default (or give a device or folder)"
+    "") [ -n "$MAC" ] || die "no default device yet: tunnel.sh default (or give a device or folder)"
         DIR="$TUNNELS/$MAC" ;;
     */*|.|..) DIR="$1" ;;
     *)  DIR="$TUNNELS/$1"; [ -d "$DIR" ] || DIR="$1" ;;
@@ -72,9 +55,12 @@ APP=""
     && [ "$(cd "$DIR" && pwd -P)" = "$(cd "$TUNNELS/$MAC" && pwd -P)" ] && APP=1
 CARRIER_DIR="$DIR/carriers"
 CONFIG_DIR="$DIR/config"
-WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
+# The WARP endpoint: ~/wg-tunnels/warp-endpoint (one line, IPv4:port), else
+# Cloudflare's default. A file, not a variable, so the menu bar sees it too.
+WARP_ENDPOINT=162.159.192.1:2408
+[ -f "$HOME/wg-tunnels/warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$HOME/wg-tunnels/warp-endpoint")
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
-    || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
+    || die "~/wg-tunnels/warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
 WARP_NET="${WARP_ENDPOINT%:*}/32"
 
 # These hold private keys

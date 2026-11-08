@@ -34,7 +34,8 @@
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
 #                 without --sing-box to add Local Mac Tunnels later
 #
-# Override the WARP endpoint with WARP_ENDPOINT (default 162.159.192.1:2408).
+# The WARP endpoint comes from ~/wg-tunnels/warp-endpoint (IPv4:port; default
+# 162.159.192.1:2408).
 
 set -u
 
@@ -42,7 +43,6 @@ REPO="$(cd "$(dirname "$0")" && pwd)"
 TUNNELS_DIR="$HOME/wg-tunnels"
 DEVICES="$TUNNELS_DIR/devices"         # one folder per device
 DEFAULT_FILE="$DEVICES/.default"       # this Mac's device (tunnel.sh default)
-WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
 INSTALLED="/usr/local/sbin/wg-tunnels"
 PLIST="/Library/LaunchDaemons/com.local.wg-tunnels.plist"
 SWIFTBAR_APP="/Applications/SwiftBar.app"
@@ -84,7 +84,12 @@ if [ "$opts" = 0 ] && [ -t 0 ] && [ ! -f "$DEFAULT_FILE" ]; then
 fi
 [ "$singbox_only" = 0 ] || { [ "$swiftbar" = 0 ] && [ "$daemon" = 1 ]; } \
     || die "--sing-box takes only --device: it sets up no Local Mac Tunnels"
-[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
+# The WARP endpoint: ~/wg-tunnels/warp-endpoint (one line, IPv4:port), else
+# Cloudflare's default. A file, not a variable, so the menu bar sees it too.
+WARP_ENDPOINT=162.159.192.1:2408
+[ -f "$TUNNELS_DIR/warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$TUNNELS_DIR/warp-endpoint")
+[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
+    || die "~/wg-tunnels/warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
 [ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
 
 echo "== Homebrew"
@@ -113,24 +118,6 @@ for pkg in $pkgs; do
 done
 
 echo "== ~/wg-tunnels"
-# Earlier layouts would strand those configs and register a second WARP
-# account. old_layout: stop on a layout from before ~/wg-tunnels/devices/
-# (nothing is moved for you). The same function is in tunnel.sh, singbox.sh
-# and wgwarp-sweep.sh.
-old_layout() {
-    local top="$HOME/wg-tunnels" d
-    for d in carriers config exports warp; do
-        [ -e "$top/$d" ] && die "$top/$d is an old layout: this Mac's folders go in $top/devices/<this Mac's name, e.g. mbp-1>. Move it first:
-  mkdir -p $top/devices/<name> && mv $top/$d $top/devices/<name>/"
-    done
-    [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
-    die "$top has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
-  mkdir -p $top/devices
-  mv $top/local $top/devices/<this Mac's name, e.g. mbp-1>
-  mv $top/sing-box/* $top/devices/ && rmdir $top/sing-box
-  (and in each device folder: mv profiles sing-box)"
-}
-old_layout
 
 if [ "$singbox_only" = 1 ]; then
     for d in "$TUNNELS_DIR" "$DEVICES"; do

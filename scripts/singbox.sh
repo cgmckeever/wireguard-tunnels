@@ -32,7 +32,7 @@
 # set by tunnel.sh default). Its profiles use the daemon's keys: run one or
 # the other, never both (tunnel.sh down before turning sing-box on).
 #
-# Override the WARP endpoint with WARP_ENDPOINT (IPv4:port, default
+# The WARP endpoint comes from ~/wg-tunnels/warp-endpoint (IPv4:port; default
 # 162.159.192.1:2408).
 
 set -o pipefail
@@ -43,9 +43,12 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 umask 077
 die() { echo "singbox.sh: $*" >&2; exit 1; }
 
-WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
+# The WARP endpoint: ~/wg-tunnels/warp-endpoint (one line, IPv4:port), else
+# Cloudflare's default. A file, not a variable, so the menu bar sees it too.
+WARP_ENDPOINT=162.159.192.1:2408
+[ -f "$HOME/wg-tunnels/warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$HOME/wg-tunnels/warp-endpoint")
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
-    || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
+    || die "~/wg-tunnels/warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
 WARP_HOST="${WARP_ENDPOINT%:*}"
 WARP_PORT="${WARP_ENDPOINT##*:}"
 WARP_NET="$WARP_HOST/32"
@@ -55,22 +58,6 @@ device_dir() {
     [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] \
         || die "device names are letters, digits, . _ - (not starting with .)"
     echo "$TUNNELS_DIR/$1"
-}
-
-# old_layout: stop on a layout from before ~/wg-tunnels/devices/ (nothing is
-# moved for you). The same function is in tunnel.sh, wgwarp-sweep.sh and install.sh.
-old_layout() {
-    local top="$HOME/wg-tunnels" d
-    for d in carriers config exports warp; do
-        [ -e "$top/$d" ] && die "$top/$d is an old layout: this Mac's folders go in $top/devices/<this Mac's name, e.g. mbp-1>. Move it first:
-  mkdir -p $top/devices/<name> && mv $top/$d $top/devices/<name>/"
-    done
-    [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
-    die "$top has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
-  mkdir -p $top/devices
-  mv $top/local $top/devices/<this Mac's name, e.g. mbp-1>
-  mv $top/sing-box/* $top/devices/ && rmdir $top/sing-box
-  (and in each device folder: mv profiles sing-box)"
 }
 
 # quiet_wgcf <dir> <args>: its chatter (a device table) only shows if it fails
@@ -407,7 +394,7 @@ cmd_build() {
     why=$(unusable "$profile"); [ -z "$why" ] || die "WARP profile $profile: $why"
 
     echo "== Sweep $dir/carriers"
-    WARP_ENDPOINT="$WARP_ENDPOINT" SWEEP_FOR_SINGBOX=1 "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"
+    SWEEP_FOR_SINGBOX=1 "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"
     echo
 
     shopt -s nullglob
@@ -510,9 +497,6 @@ cmd_list() {
     done
 }
 
-case "$1" in
-    new|build|list) old_layout ;;
-esac
 case "$1" in
     new)   cmd_new "$2" ;;
     build) cmd_build "$2" ;;

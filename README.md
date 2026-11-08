@@ -136,8 +136,6 @@ for 2.
 | `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt. Then run `tunnel.sh install`, or as root (e.g. Ansible `become`): `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
 | `--sing-box` | Only what Sing-Box Device Tunnels need (above). Takes only `--device` |
 
-It reads `WARP_ENDPOINT` ([WARP endpoint](#warp-endpoint)).
-
 ## Your folders
 
 Every *device* (this Mac, an iPhone, an Apple TV) gets a folder on this Mac,
@@ -234,13 +232,14 @@ back to TCP; pages still load.
 
 ### WARP endpoint
 
-WARP connects to `162.159.192.1:2408` unless `WARP_ENDPOINT` (IPv4
-`address:port`) says otherwise. The sweep writes it into each warped tunnel,
-so a device's warped tunnels and its WARP side must agree. To change it,
-export it in your shell profile, then redo each setup: on this Mac, re-run
-`install.sh` (it rewrites the WARP config) and [import](#tunnelsh); for each
-sing-box device, [build](#singboxsh). Until then, this Mac skips warped
-tunnels whose endpoint doesn't match its WARP config.
+WARP connects to `162.159.192.1:2408` unless `~/wg-tunnels/warp-endpoint`
+says otherwise: one line, IPv4 `address:port`, for every device. The sweep
+writes it into each warped tunnel, so a device's warped tunnels and its WARP
+side must agree. To change it, edit the file, then redo each setup: on this
+Mac, re-run `install.sh` (it rewrites the WARP config) and
+[import](#tunnelsh); for each sing-box device, [build](#singboxsh). Until
+then, this Mac skips warped tunnels whose endpoint doesn't match its WARP
+config.
 
 ## Local Mac Tunnels
 
@@ -380,11 +379,6 @@ Start here when a tunnel or the network misbehaves.
   Demand for its tunnels: it reconnects behind `up` and breaks the tunnel, so
   `up` refuses while it's on. And switch an app tunnel on only after `down`,
   or the kill switch swallows its traffic. `up` stops app tunnels for you.
-- **A script stops about the old layout?** Folders used to be
-  `~/wg-tunnels/local/` (this Mac) and `~/wg-tunnels/sing-box/<device>/`, with
-  `profiles/` inside; earlier still, this Mac's sat in `~/wg-tunnels` itself.
-  Run the `mv` commands it prints: every device goes in
-  `~/wg-tunnels/devices/`, and `profiles/` becomes `sing-box/`.
 
 ### How it works
 
@@ -619,8 +613,6 @@ change.
 | `new <device>` | Make `~/wg-tunnels/devices/<device>/` and register the device's own WARP account (needs `wgcf`) |
 | `build <device>` | Sweep its carriers, then write its profiles into its `sing-box/` (needs `jq`) |
 | `list` | Each device's carriers, tunnels and profiles, whether it has a WARP account, and which is this Mac |
-
-It reads `WARP_ENDPOINT` ([WARP endpoint](#warp-endpoint)).
 
 ### sing-box on this Mac
 
