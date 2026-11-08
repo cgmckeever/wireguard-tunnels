@@ -337,7 +337,7 @@ networks, not even DNS; `build` warns about one.
 `build` skips, and reports, a config it can't use: it needs one `[Peer]`, a
 `PrivateKey`, `PublicKey`, `Address` and an `Endpoint` as `host:port`. It also
 skips a `warped.*` file whose carrier is gone from `carriers/`. A few names are
-taken: `tunnel`, `composite.<device>` and `carrier.<carrier>`.
+taken: `tunnel`, `warp`, `composite.<device>` and `carrier.<carrier>`.
 
 ### Keys
 
@@ -358,8 +358,14 @@ at a time. `build` writes two kinds into `sing-box/`:
 
 | Profile | What's in it | Switching tunnels |
 |---------|--------------|-------------------|
-| `composite.<device>.json` | Every tunnel, with a picker in the app (warped ones first) | In the picker, without dropping the VPN |
-| `<tunnel>.json` (e.g. `warped.chicago.json`, `home.iphone.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
+| `composite.<device>.json` | Every tunnel, with a picker in the app (warped ones first, `warp` last) | In the picker, without dropping the VPN |
+| `<tunnel>.json` (e.g. `warped.chicago.json`, `home.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
+
+Every device also gets a `warp` tunnel, in the composite and as `warp.json`:
+WARP alone, straight from the network the device is on, with no carrier. It
+uses the device's own WARP account, so it needs no config of its own. Your
+traffic exits through Cloudflare, but the network you're on can see you're
+using WARP; a warped tunnel hides that inside the carrier.
 
 Start with the composite: one import, and you switch tunnels in the picker.
 Use one-tunnel profiles when a server needs to reach the device through an
@@ -408,7 +414,8 @@ A carrier taken out of `carriers/` leaves the profiles, but its
 ### What build puts in a profile
 
 - A `warped.<carrier>` is WARP detoured through that carrier, at the carrier's
-  MTU minus 80. Any other config is an endpoint as it stands.
+  MTU minus 80. `warp` is the same WARP endpoint with no carrier, at 1280.
+  Any other config is an endpoint as it stands.
 - DNS goes to 1.1.1.1 through the tunnel in use, whatever a config's own `DNS`
   line says.
 - `strict_route` keeps traffic in the VPN. sing-box has no kill switch; this

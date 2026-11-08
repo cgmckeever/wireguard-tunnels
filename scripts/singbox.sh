@@ -20,6 +20,8 @@
 #   sing-box/   what build writes, to import in the device's sing-box app:
 #                 composite.<device>.json   every tunnel, picked in the app
 #                 <tunnel>.json             one tunnel each
+#                 warp.json                 WARP alone, no carrier (in the
+#                                           composite too)
 #
 # This Mac is a device too (its folder is the one in devices/.default,
 # set by tunnel.sh default). Its profiles use the daemon's keys: run one or
@@ -146,17 +148,18 @@ endpoint_json() {
 }
 
 # warp_json <WARP profile> <tag> <carrier tag> <mtu>: WARP, carried by the
-# carrier. No keepalive: every warped tunnel on a device shares its one WARP
-# key, so only the one in use may talk to Cloudflare.
+# carrier (or straight from the device's network when the carrier tag is "").
+# No keepalive: every WARP tunnel on a device shares its one WARP key, so only
+# the one in use may talk to Cloudflare.
 warp_json() {
     KEY=$(conf_val "$1" PrivateKey) \
     jq -n --arg tag "$2" --arg detour "$3" --argjson mtu "$4" \
         --argjson address "$(conf_list "$1" Address | json_list)" \
         --arg host "$WARP_HOST" --argjson port "$WARP_PORT" --arg pub "$(conf_val "$1" PublicKey)" '
-        { type: "wireguard", tag: $tag, mtu: $mtu, address: $address, private_key: env.KEY,
-          detour: $detour,
-          peers: [ { address: $host, port: $port, public_key: $pub,
-                     allowed_ips: ["0.0.0.0/0", "::/0"] } ] }'
+        { type: "wireguard", tag: $tag, mtu: $mtu, address: $address, private_key: env.KEY }
+        + (if $detour != "" then { detour: $detour } else {} end)
+        + { peers: [ { address: $host, port: $port, public_key: $pub,
+                       allowed_ips: ["0.0.0.0/0", "::/0"] } ] }'
 }
 
 # route_rules <outbound> [cidr...]: a JSON list with a rule sending the cidrs
@@ -207,6 +210,15 @@ add_plain() {
     unit_add "$2" "$eps" '[]' "$3"
 }
 
+# add_warp: WARP alone, straight from the device's network (no carrier): the
+# device's own WARP account, at the profile's MTU (1280 from wgcf)
+add_warp() {
+    local mtu eps
+    mtu=$(conf_val "$profile" MTU); [[ "$mtu" =~ ^[0-9]+$ ]] || mtu=1280
+    eps=$(warp_json "$profile" warp "" "$mtu" | jq -sc .) || die "can't read $profile"
+    unit_add warp "$eps" '[]' "$mtu"
+}
+
 # --- checks before writing ---
 
 # key_lines <file>...: "<key><TAB><file>" for every file with a PrivateKey
@@ -245,12 +257,13 @@ each config needs its own (make a new one for this device)"
 $self" >&2
 }
 
-# check_tags <device>: endpoint names are unique ("tunnel" is the picker's), and
+# check_tags <device>: endpoint names are unique ("tunnel" is the picker's,
+# "warp" the WARP-only tunnel's), and
 # no tunnel is named like the composite profile
 check_tags() {
     local dup
     dup=$( { printf '%s\n' "${unit_eps[@]}" | jq -r '.[].tag'; echo tunnel; } | sort | uniq -d | paste -sd' ' -)
-    [ -z "$dup" ] || die "more than one tunnel would be named: $dup (rename the config; \"tunnel\" is taken)"
+    [ -z "$dup" ] || die "more than one tunnel would be named: $dup (rename the config; \"tunnel\" and \"warp\" are taken)"
     case " ${tags[*]} " in
         *" composite.$1 "*) die "a tunnel can't be named composite.$1 (rename the config)" ;;
     esac
@@ -353,6 +366,7 @@ cmd_build() {
         used+=("$conf")
     done
     [ ${#tags[@]} -gt 0 ] || die "nothing to build: put configs in $dir/carriers or $dir/config"
+    add_warp
     check_keys "$dir" "${used[@]}" "$profile"
     check_tags "$name"
 
