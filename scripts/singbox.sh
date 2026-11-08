@@ -1,39 +1,56 @@
 #!/bin/bash
-# singbox.sh — warped tunnels for devices that run sing-box (iPhone, iPad,
-# Apple TV, Android...), where the daemon can't.
+# singbox.sh — tunnels for devices that run sing-box (iPhone, iPad, Apple TV,
+# Android...), where the daemon can't, WARP inside a carrier included.
 #
 # The WireGuard app on those can't carry one tunnel inside another. sing-box
-# (App Store: "sing-box VT") can: its WireGuard endpoints take a detour, so WARP
-# rides inside the carrier, in one VPN. This builds that profile.
+# can: its WireGuard endpoints take a detour, so WARP rides inside the
+# carrier, in one VPN. This builds the profiles to import there.
 #
 # Usage:
 #   singbox.sh new <device>      make ~/wg-tunnels/sing-box/<device>/ and its own WARP account
-#   singbox.sh build <device>    sweep its carriers, write config/sing-box.json
+#   singbox.sh build <device>    sweep its carriers, write its profiles/
 #   singbox.sh list              the devices and what each has
 #
-# ~/wg-tunnels/sing-box/<device>/   (0700, it all holds private keys)
-#   carriers/   the device's own WireGuard configs to carry WARP (e.g. Proton,
-#               made for this device: a key shared with another makes both drop)
+# ~/wg-tunnels/sing-box/<device>/   (0700: it all holds private keys)
+#   carriers/   the device's own WireGuard configs to carry WARP, made for this
+#               device (a key shared with another device makes both drop)
 #   warp/       the device's own wgcf WARP account and profile (same reason)
-#   config/     what build writes: warped.<carrier>.conf (wgwarp-sweep.sh
-#               --sing-box) and sing-box.json, the profile to import
+#   config/     every tunnel on the device: warped.<carrier>.conf (from the
+#               sweep), and plain configs you put there, used as they are
+#   profiles/   what build writes, to import on the device:
+#                 composite.<device>.json   every tunnel, picked in the app
+#                 <tunnel>.json             one tunnel each
 #
-# Override with TUNNELS_DIR (default ~/wg-tunnels) and WARP_ENDPOINT.
+# Override with TUNNELS_DIR (default ~/wg-tunnels) and WARP_ENDPOINT
+# (default 162.159.192.1:2408).
 
 set -o pipefail
 TUNNELS_DIR="${TUNNELS_DIR:-$HOME/wg-tunnels}"
 SINGBOX_DIR="$TUNNELS_DIR/sing-box"
-WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1}"
-WARP_PORT=2408
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 umask 077
 die() { echo "singbox.sh: $*" >&2; exit 1; }
 
+WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
+WARP_HOST="${WARP_ENDPOINT%:*}"; WARP_HOST="${WARP_HOST#[}"; WARP_HOST="${WARP_HOST%]}"
+WARP_PORT="${WARP_ENDPOINT##*:}"
+case "$WARP_HOST" in *:*) WARP_NET="$WARP_HOST/128" ;; *) WARP_NET="$WARP_HOST/32" ;; esac
+[[ "$WARP_PORT" =~ ^[0-9]+$ ]] && [ "$WARP_HOST" != "$WARP_ENDPOINT" ] \
+    || die "WARP_ENDPOINT is host:port, e.g. 162.159.192.1:2408"
+
 device_dir() {
     [ -n "$1" ] || die "a device name, please (singbox.sh $2 <device>)"
-    [[ "$1" =~ ^[A-Za-z0-9._-]+$ ]] || die "device names are letters, digits, . _ -"
+    [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] \
+        || die "device names are letters, digits, . _ - (not starting with .)"
     echo "$SINGBOX_DIR/$1"
+}
+
+# quiet_wgcf <dir> <args>: its chatter (a device table) only shows if it fails
+quiet_wgcf() {
+    local dir="$1" output
+    shift
+    output=$(cd "$dir" && wgcf "$@" 2>&1) || { echo "$output" >&2; die "wgcf $1 failed"; }
 }
 
 cmd_new() {
@@ -46,22 +63,23 @@ cmd_new() {
     if [ -f "$dir/warp/wgcf-account.toml" ]; then
         echo "WARP account: already there"
     else
-        (cd "$dir/warp" && wgcf register --accept-tos) || die "wgcf register failed"
+        quiet_wgcf "$dir/warp" register --accept-tos
+        rm -f "$dir/warp/wgcf-profile.conf"     # one left from an earlier account
         echo "WARP account: registered"
     fi
     chmod 600 "$dir/warp/wgcf-account.toml"
-    if [ ! -f "$dir/warp/wgcf-profile.conf" ]; then
-        (cd "$dir/warp" && wgcf generate) || die "wgcf generate failed"
-    fi
+    [ -f "$dir/warp/wgcf-profile.conf" ] || quiet_wgcf "$dir/warp" generate
     chmod 600 "$dir/warp/wgcf-profile.conf"
     echo
-    echo "Next: put this device's carrier configs in ${dir}/carriers/"
-    echo "      (Proton: account.proton.me > Downloads > WireGuard configuration, a new one named $1)"
-    echo "then: singbox.sh build $1"
+    echo "Next: put this device's carriers in ${dir}/carriers/ and its plain tunnels"
+    echo "      in ${dir}/config/ (new WireGuard configs made for this device)"
+    echo "then: $HERE/singbox.sh build $1"
 }
 
-# conf_val <file> <Key>: the first value (everything after the first "=", keys
-# end in base64 "=" padding)
+# --- reading configs ---
+
+# conf_val <file> <Key>: the first <Key>'s value, everything after the first
+# "=" (keys end in base64 "=" padding)
 conf_val() {
     sed -nE "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/p" "$1" | head -1
 }
@@ -72,113 +90,300 @@ conf_list() {
 }
 json_list() { jq -R . | jq -sc .; }
 
-# carrier_json <conf> <tag>: a sing-box WireGuard endpoint from a swept config
-carrier_json() {
-    local conf="$1" ep host port mtu psk ka
+# unusable <conf>: why build can't turn a config into an endpoint, or nothing
+unusable() {
+    local peers ep mtu
+    grep -q '^\[Interface\]' "$1" || { echo "no [Interface]"; return; }
+    peers=$(grep -c '^\[Peer\]' "$1")
+    [ "$peers" = 1 ] || { echo "${peers} [Peer] sections, needs one"; return; }
+    [ -n "$(conf_val "$1" PrivateKey)" ] || { echo "no PrivateKey"; return; }
+    [ -n "$(conf_val "$1" PublicKey)" ] || { echo "no PublicKey"; return; }
+    [ -n "$(conf_list "$1" Address)" ] || { echo "no Address"; return; }
+    ep=$(conf_val "$1" Endpoint)
+    [[ "$ep" =~ :[0-9]+$ ]] || { echo "Endpoint isn't host:port"; return; }
+    mtu=$(conf_val "$1" MTU)
+    [ -z "$mtu" ] || [[ "$mtu" =~ ^[0-9]+$ ]] || echo "MTU isn't a number"
+}
+
+# warped_name <carrier file>: the tunnel the sweep makes of it (the sweep has
+# the same one-liner)
+warped_name() { echo "warped.$(basename "$1" .conf | sed -E 's/^warped[.-]//')"; }
+
+# --- sing-box JSON. Private keys go to jq in its environment, never its
+# arguments: any user on the Mac can read another's arguments in ps. ---
+
+# endpoint_json <conf> <tag> <mtu>: a sing-box WireGuard endpoint from a
+# config (a swept carrier, or a plain tunnel), keepalive included
+endpoint_json() {
+    local conf="$1" ep host port ka
     ep=$(conf_val "$conf" Endpoint)
     host="${ep%:*}"; host="${host#[}"; host="${host%]}"; port="${ep##*:}"
-    mtu=$(conf_val "$conf" MTU); mtu="${mtu:-1420}"
-    psk=$(conf_val "$conf" PresharedKey)
-    ka=$(conf_val "$conf" PersistentKeepalive)
-    jq -n --arg tag "$2" --arg key "$(conf_val "$conf" PrivateKey)" \
+    ka=$(conf_val "$conf" PersistentKeepalive); [[ "$ka" =~ ^[0-9]+$ ]] || ka=0
+    KEY=$(conf_val "$conf" PrivateKey) PSK=$(conf_val "$conf" PresharedKey) \
+    jq -n --arg tag "$2" --argjson mtu "$3" \
         --argjson address "$(conf_list "$conf" Address | json_list)" \
-        --argjson mtu "$mtu" --arg host "$host" --argjson port "$port" \
-        --arg pub "$(conf_val "$conf" PublicKey)" --arg psk "$psk" \
-        --argjson allowed "$(conf_list "$conf" AllowedIPs | json_list)" \
-        --argjson ka "${ka:-0}" '
-        { type: "wireguard", tag: $tag, mtu: $mtu, address: $address, private_key: $key,
+        --arg host "$host" --argjson port "$port" --arg pub "$(conf_val "$conf" PublicKey)" \
+        --argjson allowed "$(conf_list "$conf" AllowedIPs | json_list)" --argjson ka "$ka" '
+        { type: "wireguard", tag: $tag, mtu: $mtu, address: $address, private_key: env.KEY,
           peers: [ { address: $host, port: $port, public_key: $pub, allowed_ips: $allowed }
-                   + (if $psk != "" then { pre_shared_key: $psk } else {} end)
+                   + (if env.PSK != "" then { pre_shared_key: env.PSK } else {} end)
                    + (if $ka > 0 then { persistent_keepalive_interval: $ka } else {} end) ] }'
 }
 
-# warp_json <profile> <tag> <carrier tag> <mtu>: WARP, carried by the carrier.
-# No keepalive: every warped endpoint shares the device's one WARP key, so only
-# the one in use should talk to Cloudflare.
+# warp_json <WARP profile> <tag> <carrier tag> <mtu>: WARP, carried by the
+# carrier. No keepalive: every warped tunnel on a device shares its one WARP
+# key, so only the one in use may talk to Cloudflare.
 warp_json() {
+    KEY=$(conf_val "$1" PrivateKey) \
     jq -n --arg tag "$2" --arg detour "$3" --argjson mtu "$4" \
-        --arg key "$(conf_val "$1" PrivateKey)" \
         --argjson address "$(conf_list "$1" Address | json_list)" \
-        --arg host "$WARP_ENDPOINT" --argjson port "$WARP_PORT" \
-        --arg pub "$(conf_val "$1" PublicKey)" '
-        { type: "wireguard", tag: $tag, mtu: $mtu, address: $address, private_key: $key,
+        --arg host "$WARP_HOST" --argjson port "$WARP_PORT" --arg pub "$(conf_val "$1" PublicKey)" '
+        { type: "wireguard", tag: $tag, mtu: $mtu, address: $address, private_key: env.KEY,
           detour: $detour,
           peers: [ { address: $host, port: $port, public_key: $pub,
                      allowed_ips: ["0.0.0.0/0", "::/0"] } ] }'
 }
 
-cmd_build() {
-    local dir name profile conf src carrier tag cmtu wmtu min_mtu=9000 out tmp
-    local endpoints=() tags=()
-    name="$1"
-    dir=$(device_dir "$1" build) || exit 1
-    [ -d "$dir" ] || die "no device $1 (singbox.sh new $1)"
-    command -v jq >/dev/null || die "jq missing (brew install jq)"
-    profile="$dir/warp/wgcf-profile.conf"
-    [ -f "$profile" ] || die "no WARP profile in $dir/warp (singbox.sh new $1)"
+# route_rules <outbound> [cidr...]: a JSON list with a rule sending the cidrs
+# to the outbound, or an empty list
+route_rules() {
+    local out="$1"; shift
+    [ $# -gt 0 ] || { echo '[]'; return; }
+    printf '%s\n' "$@" | json_list | jq -c --arg out "$out" '[ { ip_cidr: ., outbound: $out } ]'
+}
 
-    echo "== Sweep ${dir}/carriers"
-    TUNNELS_DIR="$TUNNELS_DIR" WARP_ENDPOINT="$WARP_ENDPOINT" "$HERE/wgwarp-sweep.sh" --sing-box "$name" || die "sweep failed"
+# --- collecting tunnels. Each one is a unit: its tag, its endpoints (a JSON
+# list), its extra route rules and its tun MTU. These append to cmd_build's
+# lists (bash functions see their caller's locals). ---
 
-    shopt -s nullglob
-    for conf in "$dir"/config/warped.*.conf; do
-        tag=$(basename "$conf" .conf)          # warped.<carrier>
-        # Only carriers still in carriers/: the sweep leaves an orphan's file in place
-        src="$dir/carriers/${tag#warped.}"
-        [ -f "$src.conf" ] || [ -f "$dir/carriers/$tag.conf" ] \
-            || [ -f "$dir/carriers/warped-${tag#warped.}.conf" ] || continue
-        carrier="carrier.${tag#warped.}"
-        cmtu=$(conf_val "$conf" MTU); cmtu="${cmtu:-1420}"
-        # A WARP packet is up to 80 bytes bigger inside the carrier
-        wmtu=$((cmtu - 80))
-        [ "$wmtu" -lt "$min_mtu" ] && min_mtu=$wmtu
-        endpoints+=("$(carrier_json "$conf" "$carrier")") || die "can't read $conf"
-        endpoints+=("$(warp_json "$profile" "$tag" "$carrier" "$wmtu")") || die "can't read $profile"
-        tags+=("$tag")
+unit_add() { tags+=("$1"); unit_eps+=("$2"); unit_rules+=("$3"); unit_mtu+=("$4"); }
+
+# add_warped <conf> <tag> <carrier MTU>: WARP detoured through the carrier.
+# The carrier's extras (device-network, also) need a rule: AllowedIPs doesn't
+# route in sing-box, so without one they'd go into WARP. In the composite
+# profile the rule applies whichever tunnel is picked, so a network two
+# carriers claim goes to the first.
+add_warped() {
+    local conf="$1" tag="$2" carrier="carrier.${2#warped.}" cidr eps
+    # The carrier adds up to 80 bytes to each WARP packet: run WARP 80 smaller
+    local wmtu=$(( $3 - 80 ))
+    local own=() comp=()
+    while read -r cidr; do
+        own+=("$cidr")
+        case "$cidrs_seen" in
+            *" $cidr "*) echo "warning: $cidr is in two carriers: the composite profile sends it to the first, not $carrier" >&2 ;;
+            *) cidrs_seen+="$cidr "; comp+=("$cidr") ;;
+        esac
+    done < <(conf_list "$conf" AllowedIPs | grep -vxF "$WARP_NET" | sort -u)
+    eps=$( { endpoint_json "$conf" "$carrier" "$3" && warp_json "$profile" "$tag" "$carrier" "$wmtu"; } \
+        | jq -sc .) || die "can't read $conf or $profile"
+    unit_add "$tag" "$eps" "$(route_rules "$carrier" "${own[@]}")" "$wmtu"
+    [ ${#comp[@]} -eq 0 ] || comp_rules+=("$(route_rules "$carrier" "${comp[@]}" | jq -c '.[0]')")
+}
+
+# add_plain <conf> <tag> <MTU>: a tunnel used as it stands. A profile sends
+# everything to the tunnel in use, so a split config (a home LAN only, say)
+# leaves the device with nothing past its own networks, not even DNS.
+add_plain() {
+    local eps
+    conf_list "$1" AllowedIPs | grep -qxF 0.0.0.0/0 \
+        || echo "warning: $2 is a split tunnel (no 0.0.0.0/0): in sing-box it takes all traffic, and only its own networks work" >&2
+    eps=$(endpoint_json "$1" "$2" "$3" | jq -sc .) || die "can't read $1"
+    unit_add "$2" "$eps" '[]' "$3"
+}
+
+# --- checks before writing ---
+
+# key_lines <file>...: "<key><TAB><file>" for every file with a PrivateKey
+key_lines() {
+    local f k
+    for f in "$@"; do
+        [ -f "$f" ] || continue
+        k=$(conf_val "$f" PrivateKey)
+        [ -n "$k" ] && printf '%s\t%s\n' "$k" "${f#"$TUNNELS_DIR"/}"
     done
-    [ ${#tags[@]} -gt 0 ] || die "nothing to build: put carrier configs in $dir/carriers"
+}
 
-    out="$dir/config/sing-box.json"
-    tmp=$(mktemp "$dir/config/.sing-box.XXXXXX") || die "mktemp failed"
-    # Everything goes through the picked tunnel, DNS included (1.1.1.1 via
-    # WARP); strict_route keeps traffic in the VPN, the nearest sing-box gets
-    # to the kill switch
-    printf '%s\n' "${endpoints[@]}" | jq -s \
-        --argjson tags "$(printf '%s\n' "${tags[@]}" | json_list)" \
-        --argjson mtu "$min_mtu" '
+# check_keys <device dir> <file>...: no private key twice on this device, or
+# shared with this Mac or another device (two ends on one key knock each other
+# off). Names the files, never the key.
+check_keys() {
+    local dir="$1" d others=() dup
+    shift
+    shopt -s nullglob
+    others=("$TUNNELS_DIR"/local/carriers/*.conf "$TUNNELS_DIR"/local/config/*.conf
+            "$TUNNELS_DIR"/local/warp/wgcf-profile.conf)
+    for d in "$SINGBOX_DIR"/*/; do
+        [ "${d%/}" = "$dir" ] && continue
+        others+=("$d"config/*.conf "$d"warp/wgcf-profile.conf)
+    done
+    dup=$( { key_lines "$@" | awk '{ print "M\t" $0 }'; key_lines "${others[@]}" | awk '{ print "O\t" $0 }'; } \
+        | awk -F'\t' '$1 == "M" { if ($2 in mine) print "  " mine[$2] " and " $3; else mine[$2] = $3; next }
+                      ($2 in mine)  { print "  " mine[$2] " and " $3 }')
+    [ -z "$dup" ] || die "same private key in:
+$dup
+each config needs its own (make a new one for this device)"
+}
+
+# check_tags <device>: endpoint names are unique ("tunnel" is the picker's), and
+# no tunnel is named like the composite profile
+check_tags() {
+    local dup
+    dup=$( { printf '%s\n' "${unit_eps[@]}" | jq -r '.[].tag'; echo tunnel; } | sort | uniq -d | paste -sd' ' -)
+    [ -z "$dup" ] || die "more than one tunnel would be named: $dup (rename the config; \"tunnel\" is taken)"
+    case " ${tags[*]} " in
+        *" composite.$1 "*) die "a tunnel can't be named composite.$1 (rename the config)" ;;
+    esac
+}
+
+# --- writing ---
+
+# Profiles are staged as temp files and only replace the old ones once every
+# one is written (and passes sing-box check): a failed build changes nothing.
+STAGED_TMP=() STAGED_OUT=()
+trap 'rm -f "${STAGED_TMP[@]}"' EXIT
+
+# stage_profile <file> <rules> <tags> <tun MTU>: a profile from the endpoints
+# on stdin (a JSON list), extra route rules and the tunnels the picker lists,
+# written to a temp file next to <file>.
+#
+# Everything goes through the picked tunnel, DNS included (1.1.1.1, hijacked
+# from the tun). strict_route keeps traffic in the VPN: the nearest sing-box
+# gets to a kill switch. A server given by hostname is looked up on the
+# device's own network (default_domain_resolver): through the tunnel, it would
+# need itself up first.
+stage_profile() {
+    local out="$1" tmp
+    tmp=$(mktemp "$(dirname "$out")/.profile.XXXXXX") || die "mktemp failed"
+    STAGED_TMP+=("$tmp"); STAGED_OUT+=("$out")
+    jq --argjson rules "$2" --argjson tags "$3" --argjson mtu "$4" '. as $endpoints |
         { log: { level: "warn" },
-          dns: { servers: [ { type: "udp", tag: "cloudflare", server: "1.1.1.1", detour: "tunnel" } ],
+          dns: { servers: [ { type: "udp", tag: "cloudflare", server: "1.1.1.1", detour: "tunnel" },
+                            { type: "local", tag: "local" } ],
                  final: "cloudflare" },
           inbounds: [ { type: "tun", tag: "tun-in", address: ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
                         mtu: $mtu, auto_route: true, strict_route: true } ],
-          endpoints: .,
+          endpoints: $endpoints,
           outbounds: [ { type: "selector", tag: "tunnel", outbounds: $tags, default: $tags[0] } ],
-          route: { auto_detect_interface: true, final: "tunnel",
-                   rules: [ { inbound: "tun-in", action: "sniff" },
-                            { protocol: "dns", action: "hijack-dns" } ] } }' > "$tmp" \
-        || { rm -f "$tmp"; die "can't write the profile"; }
-    if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
-        rm -f "$tmp"; echo; echo "sing-box.json unchanged"
-    else
-        mv "$tmp" "$out"; echo; echo "sing-box.json written: ${#tags[@]} tunnel(s), ${tags[*]}"
-    fi
+          route: { auto_detect_interface: true, final: "tunnel", default_domain_resolver: "local",
+                   rules: ([ { inbound: "tun-in", action: "sniff" },
+                             { protocol: "dns", action: "hijack-dns" } ] + $rules) } }' > "$tmp" \
+        || die "can't write $out"
+}
+
+# commit_profiles: check every staged profile with sing-box (when it's
+# installed), then put each in place, printing new, updated or unchanged
+commit_profiles() {
+    local i tmp out state
     if command -v sing-box >/dev/null; then
-        sing-box check -c "$out" && echo "sing-box check: ok"
+        for i in "${!STAGED_TMP[@]}"; do
+            sing-box check -c "${STAGED_TMP[i]}" >&2 \
+                || die "sing-box check failed for $(basename "${STAGED_OUT[i]}"): no profile changed"
+        done
     fi
+    for i in "${!STAGED_TMP[@]}"; do
+        tmp="${STAGED_TMP[i]}" out="${STAGED_OUT[i]}"
+        if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
+            rm -f "$tmp"; state=unchanged
+        else
+            state=new; [ -f "$out" ] && state=updated
+            mv "$tmp" "$out" || die "can't write $out"
+        fi
+        printf '%-44s %s\n' "$(basename "$out")" "$state"
+    done
+    STAGED_TMP=() STAGED_OUT=()
+}
+
+cmd_build() {
+    local name="$1" dir profile conf tag why cmtu i min out eps files=() written=" "
+    local tags=() unit_eps=() unit_rules=() unit_mtu=() comp_rules=() used=()
+    local carrier_names=" " cidrs_seen=" "
+    dir=$(device_dir "$name" build) || exit 1
+    [ -d "$dir" ] || die "no device $name ($HERE/singbox.sh new $name)"
+    command -v jq >/dev/null || die "jq missing (brew install jq)"
+    profile="$dir/warp/wgcf-profile.conf"
+    [ -f "$profile" ] || die "no WARP profile in $dir/warp ($HERE/singbox.sh new $name)"
+    why=$(unusable "$profile"); [ -z "$why" ] || die "WARP profile $profile: $why"
+
+    echo "== Sweep $dir/carriers"
+    WARP_ENDPOINT="$WARP_ENDPOINT" "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"
     echo
-    echo "Next: get ${out} to the device (AirDrop, iCloud Drive) and import it in sing-box"
-    echo "      (Profiles > New Profile > Import). It holds private keys: delete the copy after."
+
+    shopt -s nullglob
+    for conf in "$dir"/carriers/*.conf; do carrier_names+="$(warped_name "$conf") "; done
+    # Warped first: the composite's default (first) tunnel is a warped one when there is one
+    files=("$dir"/config/warped.*.conf)
+    for conf in "$dir"/config/*.conf; do
+        case "$(basename "$conf")" in warped.*) ;; *) files+=("$conf") ;; esac
+    done
+    for conf in "${files[@]}"; do
+        tag=$(basename "$conf" .conf)
+        why=$(unusable "$conf")
+        if [ -n "$why" ]; then echo "skipped $tag: $why"; continue; fi
+        cmtu=$(conf_val "$conf" MTU); cmtu="${cmtu:-1420}"
+        case "$tag" in
+            warped.*)
+                case "$carrier_names" in
+                    *" $tag "*) add_warped "$conf" "$tag" "$cmtu" ;;
+                    *) echo "skipped $tag: no carrier for it in carriers/ (delete it if that's for good)"; continue ;;
+                esac ;;
+            *)  add_plain "$conf" "$tag" "$cmtu" ;;
+        esac
+        used+=("$conf")
+    done
+    [ ${#tags[@]} -gt 0 ] || die "nothing to build: put configs in $dir/carriers or $dir/config"
+    check_keys "$dir" "${used[@]}" "$profile"
+    check_tags "$name"
+
+    mkdir -p "$dir/profiles" && chmod 700 "$dir/profiles" || die "can't create $dir/profiles"
+    echo "== Profiles in $dir/profiles"
+    # One per tunnel, with the configs' keepalives: only one runs at a time
+    for i in "${!tags[@]}"; do
+        out="${tags[i]}.json"
+        # <<<, not a pipe: stage_profile records its temp file in this shell
+        stage_profile "$dir/profiles/$out" "${unit_rules[i]}" \
+            "$(echo "${tags[i]}" | json_list)" "${unit_mtu[i]}" <<< "${unit_eps[i]}"
+        written+="$out "
+    done
+    # The composite: every tunnel, picked in the app. sing-box starts every
+    # endpoint in a profile, so no keepalives: an endpoint only talks to its
+    # server while it carries traffic. The tun's MTU is the smallest, so a
+    # packet fits whichever tunnel is picked.
+    min=${unit_mtu[0]}
+    for i in "${unit_mtu[@]}"; do [ "$i" -lt "$min" ] && min=$i; done
+    out="composite.$name.json"
+    eps=$(printf '%s\n' "${unit_eps[@]}" | jq -sc 'add | map(del(.peers[].persistent_keepalive_interval))') \
+        || die "can't put the composite together"
+    stage_profile "$dir/profiles/$out" "$(printf '%s\n' "${comp_rules[@]}" | jq -sc .)" \
+        "$(printf '%s\n' "${tags[@]}" | json_list)" "$min" <<< "$eps"
+    written+="$out "
+    commit_profiles
+    # Profiles of tunnels that are gone
+    for out in "$dir"/profiles/*.json; do
+        case "$written" in *" $(basename "$out") "*) continue ;; esac
+        rm -f "$out" && printf '%-44s %s\n' "$(basename "$out")" "removed (its tunnel is gone)"
+    done
+    command -v sing-box >/dev/null || echo "(not checked: sing-box isn't installed on this Mac)"
+
+    echo
+    echo "Next: AirDrop the profiles you want to the device and import each in sing-box"
+    echo "      (Profiles > New Profile > Import). The composite switches tunnels in the"
+    echo "      app's picker without dropping the VPN; a one-tunnel profile switches by"
+    echo "      switching profiles. They hold private keys: delete the copies you send."
 }
 
 cmd_list() {
-    local dir n c
+    local dir
+    count() { echo $#; }
     shopt -s nullglob
-    for dir in "$SINGBOX_DIR"/*/; do
-        n=$(basename "$dir")
-        c=$(ls "$dir"carriers/*.conf 2>/dev/null | wc -l | tr -d ' ')
-        printf '%-16s carriers %-3s warp %-4s profile %s\n' "$n" "$c" \
-            "$([ -f "$dir/warp/wgcf-profile.conf" ] && echo yes || echo no)" \
-            "$([ -f "$dir/config/sing-box.json" ] && echo yes || echo no)"
+    set -- "$SINGBOX_DIR"/*/
+    [ $# -gt 0 ] || { echo "no sing-box devices yet ($HERE/singbox.sh new <device>)"; return; }
+    printf '%-16s %-9s %-8s %-5s %s\n' DEVICE CARRIERS TUNNELS WARP PROFILES
+    for dir; do
+        printf '%-16s %-9s %-8s %-5s %s\n' "$(basename "$dir")" \
+            "$(count "$dir"carriers/*.conf)" "$(count "$dir"config/*.conf)" \
+            "$([ -f "${dir}warp/wgcf-profile.conf" ] && echo yes || echo no)" \
+            "$(count "$dir"profiles/*.json)"
     done
 }
 

@@ -10,13 +10,13 @@
 #   tunnel.sh down          Everything down, back to the normal connection
 #   tunnel.sh [status]      Tunnels, what's up, handshakes, the exit
 #   tunnel.sh list          Number the warped and other tunnels
-#   tunnel.sh extract [zip] Replace ~/wg-tunnels/config with the .conf files in
-#                           the newest zip in ~/wg-tunnels/exports (or the one
-#                           given): the zip is the authority, configs not in it
-#                           are removed. The zip is kept.
+#   tunnel.sh extract [zip] Replace ~/wg-tunnels/local/config with the .conf
+#                           files in the newest zip in ~/wg-tunnels/local/exports
+#                           (or the one given): the zip is the authority,
+#                           configs not in it are removed. The zip is kept.
 #   tunnel.sh import [dir] [-y]
-#                           Install every .conf in ~/wg-tunnels/config (or dir)
-#                           for the daemon. Tunnels gone from it are removed.
+#                           Install every .conf in ~/wg-tunnels/local/config
+#                           (or dir) for the daemon. Tunnels gone from it are removed.
 #                           Shows what it would do and asks first (-y: don't ask).
 #   tunnel.sh extract-import
 #                           Both: extract, then import
@@ -35,12 +35,13 @@
 # up, down, import, rotate-warp, install, uninstall and breakglass use sudo
 # (admin users).
 #
-# install.sh (in this repo) sets up what this needs: wireguard-tools, the WARP
-# config and the daemon.
+# install.sh (in this repo) sets up what this needs: wireguard-tools, wgcf,
+# this Mac's WARP account and config, and the daemon.
 #
-# ~/wg-tunnels/config holds every tunnel's .conf; `tunnel.sh import` installs them.
+# ~/wg-tunnels/local/config holds every tunnel's .conf; `tunnel.sh import`
+# installs them.
 # Fill it by hand, or from the WireGuard app: Export Tunnels to Zip into
-# ~/wg-tunnels/exports, then `tunnel.sh extract-import`. The app is optional.
+# ~/wg-tunnels/local/exports, then `tunnel.sh extract-import`. The app is optional.
 # Activate tunnels with `tunnel.sh up`. A non-warped tunnel can still be switched
 # on in the app, but only after `tunnel.sh down` (the kill switch below would
 # swallow its traffic).
@@ -82,8 +83,8 @@ STATE="$ETC/state"                     # desired, last-warped, last-other
 WARP_SRC="$PREFIX/etc/wireguard/warp.conf"  # written by install.sh
 WG_RUN="${WGT_WG_RUN:-/var/run/wireguard}"  # wg-quick's <iface>.name -> utunN
 
-EXPORTS="$HOME/wg-tunnels/exports"   # WireGuard app "Export Tunnels to Zip"
-CONFIGS="$HOME/wg-tunnels/config"    # every tunnel's .conf: what import installs
+EXPORTS="$HOME/wg-tunnels/local/exports"   # WireGuard app "Export Tunnels to Zip"
+CONFIGS="$HOME/wg-tunnels/local/config"    # every tunnel's .conf: what import installs
 WAIT_SECS=30
 WATCH_SECS=30
 NET_SECS=5      # how often to look for a network change (cheap: no wg calls)
@@ -657,7 +658,7 @@ EOF
 tunnel_dns() {
     local f home
     home=$(eval echo "~${SUDO_USER:-root}")
-    for f in "$WARP_SRC" "$CONF"/*.conf "$home"/wg-tunnels/{warp,config,carriers}/*.conf; do
+    for f in "$WARP_SRC" "$CONF"/*.conf "$home"/wg-tunnels/local/{warp,config,carriers}/*.conf; do
         [ -f "$f" ] || continue
         awk -F'[[:space:]]*=[[:space:]]*' 'tolower($1) ~ /^[[:space:]]*dns$/ {print $2}' "$f"
     done | tr ', ' '\n\n' | grep . | sort -u
@@ -939,10 +940,10 @@ It reconnects behind the tunnel and breaks it. Turn it off (the tunnel → Edit 
     follow "$(cat "$RUN/request")"
 }
 
-# rotate-warp: a new WARP account in ~/wg-tunnels/warp. The old one waits in
+# rotate-warp: a new WARP account in ~/wg-tunnels/local/warp. The old one waits in
 # warp.old until the new one is imported, and comes back if registering fails.
 cmd_rotate_warp() {
-    local warp="$HOME/wg-tunnels/warp" old inst active kind
+    local warp="$HOME/wg-tunnels/local/warp" old inst active kind
     [ "$(id -u)" -ne 0 ] || die "rotate-warp: run it as your user, not root"
     inst="$(cd "$(dirname "$0")/.." && pwd)/install.sh"
     [ -x "$inst" ] || die "rotate-warp: no install.sh next to $0 (run the repo's scripts/tunnel.sh)"
@@ -1024,7 +1025,7 @@ status() {
     exit_line
 }
 
-# extract [zip]: the newest export zip (or the one given) becomes ~/wg-tunnels/config.
+# extract [zip]: the newest export zip (or the one given) becomes ~/wg-tunnels/local/config.
 # The zip is the authority: every .conf in config/ is replaced, and ones not
 # in the zip are removed. The zip is kept.
 cmd_extract() {
@@ -1059,7 +1060,7 @@ cmd_extract() {
     rm -rf "$tmp"
 }
 
-# import [dir]: install every .conf in ~/wg-tunnels/config (or dir) for the
+# import [dir]: install every .conf in ~/wg-tunnels/local/config (or dir) for the
 # daemon. Tunnels no longer there are removed (unless up right now).
 # import [dir] [-y]: shows what it would do and asks first; -y, or no terminal
 # (the menu bar), goes ahead without asking

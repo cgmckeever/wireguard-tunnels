@@ -6,7 +6,7 @@
 # Usage:
 #   ./install.sh [--swiftbar] [--no-daemon]
 #
-#   (default)     Homebrew packages wireguard-tools and wgcf; ~/wg-tunnels;
+#   (default)     Homebrew packages wireguard-tools and wgcf; ~/wg-tunnels/local;
 #                 a Cloudflare WARP account and $(brew --prefix)/etc/wireguard/warp.conf;
 #                 the daemon (/usr/local/sbin/wg-tunnels + LaunchDaemon, sudo)
 #   --swiftbar    Also the menu bar lock: SwiftBar, the tunnel-status plugin
@@ -21,7 +21,8 @@ set -u
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 TUNNELS_DIR="$HOME/wg-tunnels"
-WARP_DIR="$TUNNELS_DIR/warp"
+LOCAL_DIR="$TUNNELS_DIR/local"     # this Mac's tunnels (sing-box/ is singbox.sh's)
+WARP_DIR="$LOCAL_DIR/warp"
 WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
 INSTALLED="/usr/local/sbin/wg-tunnels"
 PLIST="/Library/LaunchDaemons/com.local.wg-tunnels.plist"
@@ -33,7 +34,7 @@ for arg in "$@"; do
     case "$arg" in
         --swiftbar)  swiftbar=1 ;;
         --no-daemon) daemon=0 ;;
-        -h|--help)   sed -n '2,19p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help)   sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
         *) echo "Unknown option: $arg (see --help)" >&2; exit 1 ;;
     esac
 done
@@ -68,12 +69,23 @@ for pkg in wireguard-tools wgcf; do
 done
 
 echo "== ~/wg-tunnels"
+# carriers/ config/ exports/ warp/ straight in ~/wg-tunnels are the old layout:
+# carrying on would register a second WARP account and strand those configs
+for d in carriers config exports warp; do
+    [ -e "$TUNNELS_DIR/$d" ] || continue
+    [ -e "$LOCAL_DIR/$d" ] && die "Both $TUNNELS_DIR/$d (the old layout) and $LOCAL_DIR/$d exist: keep one, in $LOCAL_DIR"
+    die "$TUNNELS_DIR/$d is the old layout: this Mac's folders go in $LOCAL_DIR. Move it first:
+    mkdir -p \"$LOCAL_DIR\" && mv \"$TUNNELS_DIR/$d\" \"$LOCAL_DIR/\""
+done
+umask 077    # until warp.conf is written: everything here holds private keys
 # 0700: everything under ~/wg-tunnels holds private keys
-#   carriers/  WireGuard configs to carry WARP (wgwarp-sweep.sh)
-#   config/    every tunnel's .conf: what tunnel.sh import installs
-#   exports/   WireGuard app "Export Tunnels to Zip" (every private key, plain text)
-#   warp/      the wgcf WARP account and profile
-for d in "$TUNNELS_DIR" "$TUNNELS_DIR/carriers" "$TUNNELS_DIR/config" "$TUNNELS_DIR/exports" "$WARP_DIR"; do
+#   local/       this Mac's tunnels:
+#     carriers/  WireGuard configs to carry WARP (wgwarp-sweep.sh)
+#     config/    every tunnel's .conf: what tunnel.sh import installs
+#     exports/   WireGuard app "Export Tunnels to Zip" (every private key, plain text)
+#     warp/      the wgcf WARP account and profile
+#   sing-box/    other devices' tunnels, made by singbox.sh
+for d in "$TUNNELS_DIR" "$LOCAL_DIR" "$LOCAL_DIR/carriers" "$LOCAL_DIR/config" "$LOCAL_DIR/exports" "$WARP_DIR"; do
     if [ -d "$d" ] && [ "$(stat -f %Lp "$d")" = 700 ]; then
         ok "$d"
     else
@@ -83,17 +95,14 @@ for d in "$TUNNELS_DIR" "$TUNNELS_DIR/carriers" "$TUNNELS_DIR/config" "$TUNNELS_
 done
 
 echo "== Cloudflare WARP"
-# One free WARP account per machine, created once and kept in ~/wg-tunnels/warp
+# This Mac's free WARP account, created once in ~/wg-tunnels/local/warp (each
+# sing-box device has its own: singbox.sh new)
 if [ -f "$WARP_DIR/wgcf-account.toml" ]; then
     ok "account"
 else
     (cd "$WARP_DIR" && wgcf register --accept-tos) || die "wgcf register failed"
+    rm -f "$WARP_DIR/wgcf-profile.conf"     # one left from an earlier account
     changed "account registered"
-fi
-# wgcf writes the account (its API token) 0644
-if [ "$(stat -f %Lp "$WARP_DIR/wgcf-account.toml")" != 600 ]; then
-    chmod 600 "$WARP_DIR/wgcf-account.toml"
-    changed "account file 0600"
 fi
 if [ -f "$WARP_DIR/wgcf-profile.conf" ]; then
     ok "profile"
@@ -101,14 +110,22 @@ else
     (cd "$WARP_DIR" && wgcf generate) || die "wgcf generate failed"
     changed "profile generated"
 fi
+# The account (its API token) and the profile (its private key): owner only,
+# whatever wgcf wrote them as
+for f in "$WARP_DIR/wgcf-account.toml" "$WARP_DIR/wgcf-profile.conf"; do
+    if [ "$(stat -f %Lp "$f")" != 600 ]; then
+        chmod 600 "$f"
+        changed "$f 0600"
+    fi
+done
 
 # warp.conf for wg-quick, from the wgcf profile
 profile="$WARP_DIR/wgcf-profile.conf"
-# Everything after the first "=": keys end in base64 "=" padding, which an
-# awk split on "=" would drop
-val() { sed -nE "s/^$1[[:space:]]*=[[:space:]]*([^[:space:]]+).*/\1/p" "$profile" | head -1; }
-private_key=$(val PrivateKey)
-public_key=$(val PublicKey)
+# conf_val <Key>: the value after the first "=", up to whitespace (an awk split
+# on "=" would drop the keys' base64 "=" padding)
+conf_val() { sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*([^[:space:]]+).*/\1/p" "$profile" | head -1; }
+private_key=$(conf_val PrivateKey)
+public_key=$(conf_val PublicKey)
 # wgcf writes one Address line per family
 addresses=$(awk -F'[[:space:]]*=[[:space:]]*' '$1 == "Address" {print $2}' "$profile" \
     | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep . | paste -sd, - | sed 's/,/, /g')
@@ -120,7 +137,7 @@ mkdir -p "$BREW_PREFIX/etc/wireguard" && chmod 700 "$BREW_PREFIX/etc/wireguard"
 umask 077
 tmp=$(mktemp "$BREW_PREFIX/etc/wireguard/.warp.XXXXXX") || die "mktemp failed"
 cat > "$tmp" <<EOF
-# Written by wireguard-tunnels install.sh from ~/wg-tunnels/warp/wgcf-profile.conf.
+# Written by wireguard-tunnels install.sh from ~/wg-tunnels/local/warp/wgcf-profile.conf.
 #
 # Cloudflare WARP exit, carried inside another WireGuard tunnel (warped.*). \`tunnel.sh import\`
 # copies it for the wg-tunnels daemon, which does the
@@ -130,7 +147,7 @@ cat > "$tmp" <<EOF
 PrivateKey = ${private_key}
 Address = ${addresses}
 DNS = 1.1.1.1
-# Inside the carrier's 1420
+# IPv6's minimum: fits in a carrier of 1360 or more (tunnel.sh lowers it in a smaller one)
 MTU = 1280
 Table = off
 
@@ -153,7 +170,7 @@ umask 022
 
 if [ "$daemon" = 1 ]; then
     echo "== daemon"
-    # Only when missing or older than the repo copy: installing restarts the
+    # Only when missing or different from the repo copy: installing restarts the
     # daemon (a tunnel that's up drops for a few seconds)
     if cmp -s "$REPO/scripts/tunnel.sh" "$INSTALLED" && [ -f "$PLIST" ]; then
         ok "$INSTALLED"
@@ -257,6 +274,7 @@ fi
 
 echo
 echo "Done. Next:"
-echo "  put tunnel .conf files in $TUNNELS_DIR/config (or carriers/ + $REPO/scripts/wgwarp-sweep.sh)"
+echo "  put tunnel .conf files in $LOCAL_DIR/config (or carriers in $LOCAL_DIR/carriers, then $REPO/scripts/wgwarp-sweep.sh)"
 echo "  $REPO/scripts/tunnel.sh import"
 echo "  $REPO/scripts/tunnel.sh up"
+echo "  other devices (iPhone, Apple TV): $REPO/scripts/singbox.sh new <device>"

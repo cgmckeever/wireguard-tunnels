@@ -3,87 +3,111 @@
 # Any WireGuard server works as the carrier.
 #
 # Usage:
-#   wgwarp-sweep.sh                  this Mac: ~/wg-tunnels/carriers -> config
-#   wgwarp-sweep.sh --sing-box <device>   a sing-box device: ~/wg-tunnels/sing-box/<device>/carriers
-#                                         -> config (no WireGuard app column, no extras;
-#                                         singbox.sh build runs it)
+#   wgwarp-sweep.sh          this Mac: ~/wg-tunnels/local/carriers -> config
+#   wgwarp-sweep.sh <dir>    any folder with carriers/ and config/, e.g. a
+#                            sing-box device's (singbox.sh build runs this);
+#                            no WireGuard app column then
 #
-# Reads every ~/wg-tunnels/carriers/<name>.conf (as downloaded from the
-# provider, named however you like) and writes
-# ~/wg-tunnels/config/warped.<name>.conf with AllowedIPs set to the WARP
-# endpoint (plus the addresses to reach the server by, see extras below), the DNS
-# line removed and a keepalive, so the tunnel carries WARP and nothing else.
-# Everything WARP-specific about a carrier is done here; import only checks it. The warped. prefix is how `tunnel.sh import` knows a tunnel carries
-# WARP (a carrier already named warped.* or warped-* isn't prefixed twice).
-# An existing config/ file is only replaced when the new render differs.
+# Reads every carriers/<name>.conf (as downloaded from the provider) and writes
+# config/warped.<name>.conf: AllowedIPs set to the WARP endpoint (plus the
+# extras below), the DNS line removed and a keepalive, so the tunnel carries
+# WARP and nothing else. A carrier already named warped.x or warped-x becomes
+# warped.x, not warped.warped.x. A config/ file is only rewritten when the new
+# one differs.
 #
-# The last column compares each one with the WireGuard app's tunnel of the same
-# name (the app can't be scripted, so only its server address is visible) and
-# says what to do there by hand. Only for tunnels you also keep in the app.
+# Everything WARP-specific about a carrier is done here; tunnel.sh import and
+# singbox.sh build only check it. The warped. prefix is how they know a tunnel
+# carries WARP.
 #
-# Override with TUNNELS_DIR (default ~/wg-tunnels) and WARP_ENDPOINT
-# (default 162.159.192.1, engage.cloudflareclient.com).
+# On this Mac, the last column compares each one with the WireGuard app's
+# tunnel of the same name (the app can't be scripted, so only its server
+# address is visible) and says what to do there by hand. Only for tunnels you
+# also keep in the app.
+#
+# Override the WARP endpoint with WARP_ENDPOINT (default 162.159.192.1:2408,
+# engage.cloudflareclient.com; only the address is used here).
 
-TUNNELS_DIR="${TUNNELS_DIR:-$HOME/wg-tunnels}"
-DEVICE=""
+die() { echo "wgwarp-sweep.sh: $*" >&2; exit 1; }
+
+APP=1                           # the WireGuard app column: this Mac only
 case "$1" in
-    "") ;;
-    --sing-box)
-        DEVICE="$2"
-        [[ "$DEVICE" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "Usage: wgwarp-sweep.sh [--sing-box <device>]" >&2; exit 1; }
-        TUNNELS_DIR="$TUNNELS_DIR/sing-box/$DEVICE"
-        [ -d "$TUNNELS_DIR" ] || { echo "No sing-box device $DEVICE (singbox.sh new $DEVICE)" >&2; exit 1; } ;;
-    *) echo "Usage: wgwarp-sweep.sh [--sing-box <device>]" >&2; exit 1 ;;
+    "") DIR="$HOME/wg-tunnels/local" ;;
+    -*) die "usage: wgwarp-sweep.sh [<dir>]" ;;
+    *)  DIR="$1"; APP=""
+        [ -d "$DIR" ] || die "no folder $DIR" ;;
 esac
-CARRIER_DIR="$TUNNELS_DIR/carriers"
-CONFIG_DIR="$TUNNELS_DIR/config"
-WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1}"
+[ $# -le 1 ] || die "usage: wgwarp-sweep.sh [<dir>]"
+CARRIER_DIR="$DIR/carriers"
+CONFIG_DIR="$DIR/config"
+WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
+WARP_HOST="${WARP_ENDPOINT%:*}"; WARP_HOST="${WARP_HOST#[}"; WARP_HOST="${WARP_HOST%]}"
+case "$WARP_HOST" in *:*) WARP_NET="$WARP_HOST/128" ;; *) WARP_NET="$WARP_HOST/32" ;; esac
 
 # These hold private keys
 umask 077
-mkdir -p "$CARRIER_DIR" "$CONFIG_DIR"
-chmod 700 "$TUNNELS_DIR" "$CARRIER_DIR" "$CONFIG_DIR"
+mkdir -p "$CARRIER_DIR" "$CONFIG_DIR" || die "can't create $CARRIER_DIR or $CONFIG_DIR"
+chmod 700 "$DIR" "$CARRIER_DIR" "$CONFIG_DIR"
 
+# warped_name <carrier file>: the tunnel it becomes (x.conf, warped.x.conf and
+# warped-x.conf all become warped.x). singbox.sh has the same one-liner.
+warped_name() { echo "warped.$(basename "$1" .conf | sed -E 's/^warped[.-]//')"; }
+
+# valid <conf>: a one-peer client config with a key and an endpoint
 valid() {
-    grep -q '^\[Interface\]' "$1" && grep -q '^\[Peer\]' "$1" \
+    grep -q '^\[Interface\]' "$1" && [ "$(grep -c '^\[Peer\]' "$1")" = 1 ] \
         && grep -qE '^[[:space:]]*PrivateKey[[:space:]]*=' "$1" \
         && grep -qE '^[[:space:]]*Endpoint[[:space:]]*=' "$1"
 }
 
-# A carrier's AllowedIPs beyond the WARP endpoint, from its header comments:
-#   # device-network: 10.9.8.0/24     (wireguard-tools writes this)
-#   # wg-tunnels: also 10.0.0.5/32    (add your own)
-# wireguard-tools' static device addresses let the server and the Mac reach each
-# other through the carrier. Rebuilt every sweep: delete a line and it's gone.
-# extras <conf> narrow|wide: the entries a carrier may have, or the ones refused
-# (wider than /8, or /16 for IPv6: those would take traffic away from WARP).
-# None for a sing-box device: nothing on the server needs to reach it, so it carries WARP only.
+# A carrier's AllowedIPs beyond the WARP endpoint come from these header lines:
+#   # device-network: 10.9.8.0/24     (the wireguard-tools server repo writes this)
+#   # wg-tunnels: also 10.0.0.5/32    (add your own; a "#" after them is a comment)
+# device-network is the server's static device addresses: with it the server
+# and this device reach each other through the carrier. Rebuilt every sweep:
+# delete a line and it's gone.
+#
+# extras <conf>: each entry on those lines as "<verdict> <entry>":
+#   kept   an address or network the carrier takes
+#   wide   wider than /8 (/16 for IPv6): it would take traffic away from WARP
+#   bad    not an address (a hostname, a typo)
+V4='^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$'
+V6='^[0-9A-Fa-f]*:[0-9A-Fa-f:.]*(/[0-9]{1,3})?$'
 extras() {
-    local e p
-    [ -n "$DEVICE" ] && return
+    local e p min max
     sed -nE 's/^#[[:space:]]*(device-network:|wg-tunnels:[[:space:]]*also)[[:space:]]*//p' "$1" \
-        | tr ', \t\r' '\n\n\n\n' | grep . | while read -r e; do
-            p="${e#*/}"; [ "$p" = "$e" ] && p=128
-            case "$e" in *:*) min=16 ;; *) min=8; [ "$p" = 128 ] && p=32 ;; esac
-            if [[ "$p" =~ ^[0-9]+$ ]] && [ "$p" -ge "$min" ]; then
-                [ "$2" = narrow ] && echo "$e"
-            else
-                [ "$2" = wide ] && echo "$e"
+        | sed 's/#.*//' | tr ', \t\r' '\n\n\n\n' | grep . | while read -r e; do
+            if [[ "$e" =~ $V4 ]]; then min=8; max=32
+            elif [[ "$e" =~ $V6 ]]; then min=16; max=128
+            else echo "bad $e"; continue
+            fi
+            p=$max; case "$e" in */*) p="${e#*/}" ;; esac
+            if [ "$p" -gt "$max" ]; then echo "bad $e"
+            elif [ "$p" -lt "$min" ]; then echo "wide $e"
+            else echo "kept $e"
             fi
         done
 }
+# extras_of <conf> kept|wide|bad: just those entries, one per line
+extras_of() { extras "$1" | sed -n "s/^$2 //p"; }
 
-# The carrier carries WARP and its extras only: AllowedIPs set, DNS gone (it
-# comes from WARP), a keepalive so a stale handshake means trouble
+# render <carrier>: the warped config. It carries WARP and its extras only: one
+# AllowedIPs line, DNS gone (it comes from WARP), a keepalive so a stale
+# handshake means trouble.
 render() {
-    local allowed="$WARP_ENDPOINT/32" e
-    for e in $(extras "$1" narrow); do allowed+=", $e"; done
-    awk -v allowed="$allowed" '
+    local allowed="$WARP_NET" e has=0
+    while read -r e; do allowed+=", $e"; done < <(extras_of "$1" kept)
+    grep -qE '^[[:space:]]*AllowedIPs[[:space:]]*=' "$1" && has=1
+    awk -v allowed="$allowed" -v has="$has" '
         { sub(/\r$/, "") }
         /^[[:space:]]*DNS[[:space:]]*=/                 { next }
         /^[[:space:]]*PersistentKeepalive[[:space:]]*=/ { next }
-        /^[[:space:]]*AllowedIPs[[:space:]]*=/          { print "AllowedIPs = " allowed; next }
-        /^[[:space:]]*Endpoint[[:space:]]*=/            { print; print "PersistentKeepalive = 25"; next }
+        /^[[:space:]]*AllowedIPs[[:space:]]*=/ { if (!done) print "AllowedIPs = " allowed; done = 1; next }
+        /^[[:space:]]*Endpoint[[:space:]]*=/ {
+            print
+            if (!has) print "AllowedIPs = " allowed
+            print "PersistentKeepalive = 25"
+            next
+        }
         { print }
     ' "$1"
 }
@@ -92,11 +116,12 @@ endpoint_of() {
     awk -F'[[:space:]]*=[[:space:]]*' '/^[[:space:]]*Endpoint[[:space:]]*=/ {print $2; exit}' "$1"
 }
 
-# The WireGuard app's copy of a tunnel (only matters if you use the app), given
-# the config/ file's state (new/updated/unchanged). Nothing here is about
-# tunnel.sh import, which reads config/ itself.
+# app_action <name> <endpoint> <new|updated|unchanged>: what to do about the
+# WireGuard app's copy of a tunnel (only matters if you use the app). Nothing
+# here is about tunnel.sh import, which reads config/ itself.
 app_action() {
     local name="$1" endpoint="$2" state="$3" remote host ip
+    [ -n "$APP" ] || return 0
     if [ -z "$(scutil --nc status "$name" 2>/dev/null | head -1)" ]; then
         echo "not there: add it in the app"
         return
@@ -110,72 +135,74 @@ app_action() {
     elif [ "$state" = "updated" ]; then
         echo "there, but changed: remove it and add again in the app"
     elif [ "$state" = "new" ]; then
-        echo "there, same server: add again in the app if it wasn't from config/"
+        echo "there, same server: if the app's copy isn't this config, remove it and add again"
     else
         echo "there, same server"
     fi
 }
 
-# A sing-box device's tunnels: this Mac's WireGuard app has nothing to do with them
-if [ -n "$DEVICE" ]; then app_action() { :; }; fi
+row()  { printf '%-28s %-10s %s\n' "$@"; }
+note() { printf '%-28s %s\n' "" "└ $*"; }
+list() { paste -sd, - | sed 's/,/, /g'; }
 
 shopt -s nullglob
 raws=("$CARRIER_DIR"/*.conf)
 if [ ${#raws[@]} -eq 0 ]; then
-    echo "No configs in ${CARRIER_DIR} — put WireGuard configs there, named <tunnel>.conf"
+    echo "No configs in ${CARRIER_DIR}: put WireGuard configs there (x.conf becomes warped.x)"
     echo
 fi
 
-app_col="WIREGUARD APP (only if you use it)"; [ -n "$DEVICE" ] && app_col=""
-printf '%-28s %-10s %s\n' "TUNNEL" "FILE" "$app_col"
+row "TUNNEL" "FILE" "$([ -n "$APP" ] && echo "WIREGUARD APP (only if you use it)")"
+names=" "                       # every warped name a carrier claims
 for raw in "${raws[@]}"; do
-    name="warped.$(basename "$raw" .conf | sed -E 's/^warped[.-]//')"
+    name=$(warped_name "$raw")
     out="$CONFIG_DIR/${name}.conf"
+    case "$names" in
+        *" $name "*) row "$name" "skipped" "$(basename "$raw"): another carrier already makes $name"; continue ;;
+    esac
+    names+="$name "
 
     if ! valid "$raw"; then
-        printf '%-28s %-10s %s\n' "$name" "skipped" "not a WireGuard config (no Interface/Peer/PrivateKey/Endpoint)"
+        row "$name" "skipped" "not a one-peer WireGuard config (Interface, one Peer, PrivateKey, Endpoint)"
         continue
     fi
 
-    tmp=$(mktemp "$CONFIG_DIR/.render.XXXXXX")
-    render "$raw" > "$tmp"
+    tmp=$(mktemp "$CONFIG_DIR/.render.XXXXXX") || die "mktemp failed in $CONFIG_DIR"
+    render "$raw" > "$tmp" || { rm -f "$tmp"; die "can't render $raw"; }
     if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
         rm -f "$tmp"
         state="unchanged"
     else
         [ -f "$out" ] && state="updated" || state="new"
-        mv "$tmp" "$out"
+        mv "$tmp" "$out" || { rm -f "$tmp"; die "can't write $out"; }
     fi
 
-    printf '%-28s %-10s %s\n' "$name" "$state" "$(app_action "$name" "$(endpoint_of "$out")" "$state")"
-    e=$(extras "$raw" narrow | paste -sd, - | sed 's/,/, /g')
-    [ -n "$e" ] && printf '%-28s %s\n' "" "└ also carries ${e}"
-    e=$(extras "$raw" wide | paste -sd, - | sed 's/,/, /g')
-    [ -n "$e" ] && printf '%-28s %s\n' "" "└ ignored, too wide (would bypass WARP): ${e}"
-    # A small carrier MTU: the daemon runs WARP 80 smaller inside it (tunnel.sh)
+    row "$name" "$state" "$(app_action "$name" "$(endpoint_of "$out")" "$state")"
+    e=$(extras_of "$raw" kept | list); [ -n "$e" ] && note "also carries ${e}"
+    e=$(extras_of "$raw" wide | list); [ -n "$e" ] && note "ignored, too wide (would bypass WARP): ${e}"
+    e=$(extras_of "$raw" bad | list);  [ -n "$e" ] && note "ignored, not an address: ${e}"
+    # WARP needs 1280 inside (IPv6's minimum), so a carrier under 1360 makes
+    # tunnel.sh and singbox.sh run it at the carrier's MTU - 80
     mtu=$(sed -nE 's/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$out" | head -1)
     if [ -n "$mtu" ] && [ "$mtu" -lt 1360 ]; then
-        printf '%-28s %s\n' "" "└ carrier MTU ${mtu}: WARP runs at $((mtu - 80)) inside (IPv6 and QUIC fall back)"
+        note "carrier MTU ${mtu}: WARP runs at $((mtu - 80)) inside (IPv6 and QUIC fall back)"
     fi
 done
 
-# config/ files with no carriers/ source: a WARP-pinned one lost its source
-# (reported, never deleted); anything else was put there by hand
+# config/ files no carrier claims: one carrying only the WARP endpoint (plus
+# extras) was swept and lost its carrier (an orphan: reported, never deleted);
+# anything else was put there by hand
 for out in "$CONFIG_DIR"/*.conf; do
     name=$(basename "$out" .conf)
-    src=0
-    for raw in "${raws[@]}"; do
-        [ "warped.$(basename "$raw" .conf | sed -E 's/^warped[.-]//')" = "$name" ] && src=1 && break
-    done
-    [ "$src" = 1 ] && continue
-    if grep -qE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_ENDPOINT//./\\.}/32([[:space:]]*,.*)?[[:space:]]*$" "$out"; then
-        printf '%-28s %-10s %s\n' "$name" "orphan" "(no carriers/ source: left in place)"
+    case "$names" in *" $name "*) continue ;; esac
+    if grep -qE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_NET//./\\.}([[:space:]]*,.*)?[[:space:]]*$" "$out"; then
+        row "$name" "orphan" "(no carrier in carriers/: left in place)"
     else
-        printf '%-28s %-10s %s\n' "$name" "manual" "$(app_action "$name" "$(endpoint_of "$out")" "unchanged")"
+        row "$name" "manual" "$(app_action "$name" "$(endpoint_of "$out")" "unchanged")"
     fi
 done
 
-[ -n "$DEVICE" ] && exit 0
+[ -n "$APP" ] || exit 0
 echo
 echo "Next: tunnel.sh import   (installs everything in ${CONFIG_DIR} for the daemon)"
 echo "The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise."
