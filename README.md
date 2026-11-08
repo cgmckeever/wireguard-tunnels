@@ -6,7 +6,8 @@
 
 It runs Cloudflare WARP inside a WireGuard tunnel. The WireGuard tunnel (the
 *carrier*) goes to a server you pick, a VPN provider's or your own; WARP rides
-inside it; and your traffic leaves through Cloudflare:
+inside it; and your traffic leaves through Cloudflare within that region, not
+your location:
 
 ```
 device ──WireGuard (carrier)──▶ carrier server ──WARP──▶ Cloudflare ──▶ sites
