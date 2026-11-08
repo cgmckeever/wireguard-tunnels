@@ -19,9 +19,12 @@
 #               sweep), and plain configs you put there, used as they are
 #   sing-box/   what build writes, to import in the device's sing-box app:
 #                 composite.<device>.json   every tunnel, picked in the app
+#                 <server>.all.<device>.json  one server's tunnels (dengar.*)
+#                 local.all.<device>.json   the local ones: warped.*, local.*
+#                                           and warp (groups of 2+ only)
 #                 <tunnel>.json             one tunnel each
 #                 warp.json                 WARP alone, no carrier (in the
-#                                           composite too)
+#                                           composite and local.all too)
 #               build owns this folder: a .json it didn't write is removed
 #
 # This Mac is a device too (its folder is the one in devices/.default,
@@ -187,34 +190,32 @@ route_rules() {
 # --- collecting tunnels. Each one is a unit: its tag, its endpoints (a JSON
 # list), its extra route rules and its tun MTU. These change cmd_build's
 # locals (bash functions see their caller's): unit_add appends to tags,
-# unit_eps, unit_rules and unit_mtu; add_warped also keeps cidrs_seen and
-# comp_rules (the composite's route rules). ---
+# unit_eps, unit_rules and unit_mtu; add_warped also keeps cidrs_seen. ---
 
 unit_add() { tags+=("$1"); unit_eps+=("$2"); unit_rules+=("$3"); unit_mtu+=("$4"); }
 
 # add_warped <conf> <tag> <carrier MTU> <WARP profile>: WARP detoured through
 # the carrier. The carrier's extras (device-network, tunnel-routes) need a rule:
 # AllowedIPs doesn't route in sing-box, so without one they'd go into WARP. In
-# the composite profile the rule applies whichever tunnel is picked, so a
-# network two carriers claim goes to the first.
+# a profile with several tunnels the rule applies whichever tunnel is picked,
+# so a network two carriers claim goes to the first (group_rules).
 add_warped() {
     local conf="$1" tag="$2" carrier="carrier.${2#warped.}" profile="$4" cidr eps wmtu
     # WARP runs at its own MTU (1280 from wgcf), as on the Mac; the carrier adds
     # up to 80 bytes to each WARP packet, so a carrier under that + 80 lowers it
     wmtu=$(warp_mtu "$profile")
     [ $(( $3 - 80 )) -lt "$wmtu" ] && wmtu=$(( $3 - 80 ))
-    local own=() comp=()
+    local own=()
     while read -r cidr; do
         own+=("$cidr")
         case "$cidrs_seen" in
-            *" $cidr "*) echo "warning: $cidr is in two carriers: the composite profile sends it to the first, not $carrier" >&2 ;;
-            *) cidrs_seen+="$cidr "; comp+=("$cidr") ;;
+            *" $cidr "*) echo "warning: $cidr is in two carriers: profiles with both send it to the first, not $carrier" >&2 ;;
+            *) cidrs_seen+="$cidr " ;;
         esac
     done < <(conf_list "$conf" AllowedIPs | grep -vxF "$WARP_NET" | sort -u)
     eps=$( { endpoint_json "$conf" "$carrier" "$3" && warp_json "$profile" "$tag" "$carrier" "$wmtu"; } \
         | jq -sc .) || die "can't read $conf or $profile"
     unit_add "$tag" "$eps" "$(route_rules "$carrier" "${own[@]}")" "$wmtu"
-    [ ${#comp[@]} -eq 0 ] || comp_rules+=("$(route_rules "$carrier" "${comp[@]}" | jq -c '.[0]')")
 }
 
 # add_plain <conf> <tag> <MTU>: a tunnel used as it stands. A profile sends
@@ -284,7 +285,7 @@ $self" >&2
 
 # check_tags <device>: endpoint names are unique ("tunnel" is the picker's,
 # "warp" the WARP-only tunnel's, carrier.<name> a warped tunnel's carrier),
-# and no tunnel is named like the composite profile
+# and no tunnel is named like the composite or a group profile
 check_tags() {
     local dup
     dup=$( { printf '%s\n' "${unit_eps[@]}" | jq -r '.[].tag'; echo tunnel; } | sort | uniq -d | paste -sd' ' -)
@@ -292,6 +293,10 @@ check_tags() {
     case " ${tags[*]} " in
         *" composite.$1 "*) die "a tunnel can't be named composite.$1 (rename the config)" ;;
     esac
+    local t
+    for t in "${tags[@]}"; do
+        case "$t" in *.all."$1") die "a tunnel can't be named $t: <name>.all.$1 is a group profile (rename the config)" ;; esac
+    done
 }
 
 # --- writing ---
@@ -352,10 +357,46 @@ commit_profiles() {
     STAGED_TMP=() STAGED_OUT=()
 }
 
+# group_key <tag>: the group profile a tunnel also goes in, from the first
+# word of its name: warped.*, local.* and warp (WARP alone) are the device's
+# local tunnels; anything else, e.g. dengar.chicago.iphone, its server's
+group_key() {
+    local k
+    k=$(printf '%s' "${1%%.*}" | tr '[:upper:]' '[:lower:]')
+    case "$k" in warp|warped) k=local ;; esac
+    echo "$k"
+}
+
+# stage_group <file> <unit index>...: one profile with those tunnels, picked
+# in the app. sing-box starts every endpoint in a profile, so no keepalives:
+# an endpoint only talks to its server while it carries traffic. The tun's
+# MTU is the smallest, so a packet fits whichever tunnel is picked. A network
+# two carriers' extras claim goes to the first.
+stage_group() {
+    local out="$1" i min eps rules picks=()
+    shift
+    min=${unit_mtu[$1]}
+    for i; do
+        [ "${unit_mtu[i]}" -lt "$min" ] && min=${unit_mtu[i]}
+        picks+=("${tags[i]}")
+    done
+    eps=$(for i; do echo "${unit_eps[i]}"; done \
+        | jq -sc 'add | map(del(.peers[]?.persistent_keepalive_interval))') \
+        || die "can't put $(basename "$out") together"
+    rules=$(for i; do echo "${unit_rules[i]}"; done | jq -sc 'add // [] |
+        reduce .[] as $r ({seen: {}, rules: []};
+            . as $acc | ($r.ip_cidr | map(select($acc.seen[.] | not))) as $new
+            | if ($new | length) > 0
+              then .rules += [ { ip_cidr: $new, outbound: $r.outbound } ]
+                   | .seen += ($new | map({ (.): true }) | add)
+              else . end) | .rules') || die "can't put $(basename "$out") together"
+    stage_profile "$out" "$rules" "$(printf '%s\n' "${picks[@]}" | json_list)" "$min" <<< "$eps"
+}
+
 cmd_build() {
     local name="$1" dir profile conf tag why cmtu i min out eps setup files=() written=" "
-    local tags=() unit_eps=() unit_rules=() unit_mtu=() comp_rules=() used=()
-    local carrier_names=" " cidrs_seen=" "
+    local tags=() unit_eps=() unit_rules=() unit_mtu=() used=() members=()
+    local carrier_names=" " cidrs_seen=" " keys=" " k
     dir=$(device_dir "$name" build) || exit 1
     setup="$HERE/singbox.sh new $name"; [ "$name" = "$MAC" ] && setup="install.sh"
     [ -d "$dir" ] || die "no device $dir ($setup)"
@@ -410,23 +451,31 @@ cmd_build() {
             "$(echo "${tags[i]}" | json_list)" "${unit_mtu[i]}" <<< "${unit_eps[i]}"
         written+="$out "
     done
-    # The composite: every tunnel, picked in the app. sing-box starts every
-    # endpoint in a profile, so no keepalives: an endpoint only talks to its
-    # server while it carries traffic. The tun's MTU is the smallest, so a
-    # packet fits whichever tunnel is picked.
-    min=${unit_mtu[0]}
-    for i in "${unit_mtu[@]}"; do [ "$i" -lt "$min" ] && min=$i; done
+    # The composite: every tunnel
     out="composite.$name.json"
-    eps=$(printf '%s\n' "${unit_eps[@]}" | jq -sc 'add | map(del(.peers[].persistent_keepalive_interval))') \
-        || die "can't put the composite together"
-    stage_profile "$dir/sing-box/$out" "$(printf '%s\n' "${comp_rules[@]}" | jq -sc .)" \
-        "$(printf '%s\n' "${tags[@]}" | json_list)" "$min" <<< "$eps"
+    stage_group "$dir/sing-box/$out" "${!tags[@]}"
     written+="$out "
+    # Groups: <server>.all.<device> for a server's tunnels, local.all.<device>
+    # for the local ones (warped, local.*, warp). Only with two or more.
+    for i in "${!tags[@]}"; do
+        k=$(group_key "${tags[i]}")
+        case "$keys" in *" $k "*) ;; *) keys+="$k " ;; esac
+    done
+    for k in $keys; do
+        members=()
+        for i in "${!tags[@]}"; do
+            [ "$(group_key "${tags[i]}")" = "$k" ] && members+=("$i")
+        done
+        [ ${#members[@]} -ge 2 ] || continue
+        out="$k.all.$name.json"
+        stage_group "$dir/sing-box/$out" "${members[@]}"
+        written+="$out "
+    done
     commit_profiles
-    # Profiles of tunnels that are gone
+    # Profiles no longer built (a tunnel or a group gone)
     for out in "$dir"/sing-box/*.json; do
         case "$written" in *" $(basename "$out") "*) continue ;; esac
-        rm -f "$out" && printf '%-44s %s\n' "$(basename "$out")" "removed (its tunnel is gone)"
+        rm -f "$out" && printf '%-44s %s\n' "$(basename "$out")" "removed (no longer built)"
     done
     command -v sing-box >/dev/null || echo "(not checked: sing-box isn't installed on this Mac)"
 
@@ -439,9 +488,10 @@ cmd_build() {
         return
     fi
     echo "Next: AirDrop the profiles you want to the device and import each in sing-box"
-    echo "      (Profiles > New Profile > Import). The composite switches tunnels in the"
-    echo "      app's picker without dropping the VPN; a one-tunnel profile switches by"
-    echo "      switching profiles. They hold private keys: delete the copies you send."
+    echo "      (Profiles > New Profile > Import). The composite (every tunnel) and the"
+    echo "      .all. groups (one server's, or the local ones) switch tunnels in the app's"
+    echo "      picker without dropping the VPN; a one-tunnel profile switches by switching"
+    echo "      profiles. They hold private keys: delete the copies you send."
 }
 
 cmd_list() {

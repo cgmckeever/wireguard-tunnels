@@ -479,26 +479,42 @@ device yet, or another one? `singbox.sh new <device>` first):
 
 ### Which profile to import
 
-`build` writes two kinds of profile; the app runs one profile at a time:
+`build` writes three kinds of profile; the app runs one profile at a time:
 
 | Profile | What's in it | Switching tunnels |
 |---------|--------------|-------------------|
-| `composite.<device>.json` | Every tunnel, with a picker in the app (warped ones first, `warp` last) | In the picker, without dropping the VPN |
-| `<tunnel>.json` (e.g. `warped.chicago.json`, `home.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
+| `composite.<device>.json` | Every tunnel (warped ones first, `warp` last) | In the app's picker, without dropping the VPN |
+| `<group>.all.<device>.json` | One group of tunnels (below) | In the picker, as in the composite |
+| `<tunnel>.json` (e.g. `warped.chicago.json`, `dengar.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
 
-Every device also gets a `warp` tunnel, in the composite and as `warp.json`:
+The groups come from the first word of each tunnel's name (in any case):
+
+| Group profile | Tunnels in it | e.g. |
+|---------------|---------------|------|
+| `local.all.<device>.json` | The local ones: every `warped.*` tunnel (whatever carries it), every `local.*` tunnel (a provider config used directly), and `warp` | `warped.chicago`, `local.chicago`, `warp` |
+| `<server>.all.<device>.json` | Every tunnel whose name starts with that server | `dengar.all.iphone.json`: `dengar.chicago.iphone`, `dengar.warped.chicago.iphone` |
+
+A group is only written when it has two or more tunnels, even if it ends up
+holding the same tunnels as the composite. Name plain configs to match:
+`local.<name>.conf` for a provider config used directly,
+`<server>.<name>.conf` for one of your servers (wireguard-tools' names
+already are).
+
+Every device also gets a `warp` tunnel, in the composite, in
+`local.all.<device>.json` and as `warp.json`:
 WARP alone, straight from the device's network, with no carrier. It uses the
 device's own WARP account, so it needs no config of its own. Traffic exits
 through Cloudflare, but the network you're on can see you're using WARP; a
 warped tunnel hides that inside the carrier.
 
 Start with the composite: one import, and you switch tunnels in the picker.
-Use one-tunnel profiles when a server must reach the device through an idle
+Use a group to keep the picker short (only your own server's tunnels, say),
+and one-tunnel profiles when a server must reach the device through an idle
 tunnel (a home server, say), or when one tunnel's small MTU would slow the
-rest. You can import both kinds.
+rest. You can import any mix.
 
 sing-box starts every tunnel in a profile at once, not just the one picked.
-So the composite leaves out keepalives: each tunnel talks to its server only
+So the composite and the groups leave out keepalives: each tunnel talks to its server only
 while it carries traffic. Otherwise every tunnel would stay connected, and the
 warped ones, sharing the device's WARP key, would knock each other off. The
 costs:
@@ -536,7 +552,8 @@ for these.
 
 1. Change `carriers/` or `config/`: add, replace or delete a `.conf`.
 2. Run `singbox.sh build <device>`. It lists each profile as `new`,
-   `updated`, `unchanged`, or removed (its tunnel is gone).
+   `updated`, `unchanged`, or removed (no longer built: its tunnel is gone, or
+   its group is down to one).
 3. Send only the `new` and `updated` ones. In the app, delete the old profile
    and import the new one; an import adds a profile, it doesn't replace one.
 
@@ -564,7 +581,7 @@ carrier copied from a config in `config/`, say) only gets a note: a device
 runs one tunnel at a time.
 
 **Names.** These tunnel names are reserved: `tunnel`, `warp`,
-`composite.<device>` and `carrier.<carrier>`.
+`composite.<device>`, `<group>.all.<device>` and `carrier.<carrier>`.
 
 **Profiles.**
 
@@ -579,9 +596,9 @@ runs one tunnel at a time.
 - A server given by hostname is looked up on the device's own network, since
   through the tunnel it would need that tunnel up first.
 - A carrier's [extras](#extras) get a rule sending them to the carrier, since
-  `AllowedIPs` doesn't route in sing-box. In the composite the rule applies
-  whichever tunnel is picked; if two carriers list the same network, the
-  first keeps it and `build` warns (it only spots identical entries, not
+  `AllowedIPs` doesn't route in sing-box. In the composite and the groups
+  the rule applies whichever tunnel is picked; if two carriers list the same
+  network, the first keeps it and `build` warns (it only spots identical entries, not
   overlapping ones).
 
 **The folder.** `build` owns `sing-box/`: a `.json` there that it didn't
