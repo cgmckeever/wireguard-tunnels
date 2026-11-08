@@ -211,13 +211,14 @@ For an iPhone or Apple TV, see [sing-box devices](#sing-box-devices).
 | `rotate-warp` | New Cloudflare WARP keys: registers a new WARP account (through `install.sh`), imports it, and reconnects a warped tunnel that's up. The old account's files are deleted once that works (Cloudflare isn't told), or put back if registering fails. This Mac only: sing-box devices keep their own accounts |
 | `log` | Follow the daemon's log |
 | `breakglass` | Lost the network? See [Troubleshooting](#troubleshooting) |
-| `install` | Install just the daemon (`install.sh` does this) |
+| `update` | Bring the daemon up to date with the repo's `tunnel.sh`, only when it differs (or its LaunchDaemon is missing): after a `git pull`, say. Restarts the daemon, so a tunnel that's up drops for a few seconds |
+| `install` | Install just the daemon, even when it's current (`install.sh` does this) |
 | `uninstall` | Take everything down and remove the daemon; configs are kept |
 
-`up`, `down`, `import`, `rotate-warp`, `install`, `uninstall` and
+`up`, `down`, `import`, `rotate-warp`, `update`, `install`, `uninstall` and
 `breakglass` use `sudo`.
 `up`, `down` and `import` first update the installed daemon when the repo copy
-differs.
+differs, as `update` does on its own.
 
 ### wgwarp-sweep.sh
 

@@ -22,6 +22,8 @@
 #                           first time a command needs it)
 #   tunnel.sh extract-import
 #                           Both: extract, then import
+#   tunnel.sh update        Update the daemon from this copy, only if it differs
+#                           (up, down and import do this too)
 #   tunnel.sh install       Install /usr/local/sbin/wg-tunnels and its LaunchDaemon
 #   tunnel.sh uninstall     Take everything down, remove both (configs are kept)
 #   tunnel.sh rotate-warp   New Cloudflare WARP keys: registers a new account
@@ -34,7 +36,7 @@
 #                           and any reject route; puts tunnel DNS back to DHCP;
 #                           power cycles Wi-Fi if it has no address. Trusts no state.
 #
-# up, down, import, rotate-warp, install, uninstall and breakglass use sudo
+# up, down, import, rotate-warp, update, install, uninstall and breakglass use sudo
 # (admin users).
 #
 # install.sh (in this repo) sets up what this needs: wireguard-tools, wgcf,
@@ -856,14 +858,14 @@ root() {
 ready() {
     [ -x "$INSTALLED" ] || die "Not installed. First time:
   install.sh (in this repo)
-  put .conf files in ${CONFIGS} (or WireGuard app → Export Tunnels to Zip… into ${EXPORTS}, then tunnel.sh extract)
+  put .conf files in ${TUNNELS}/<this Mac>/config (or WireGuard app → Export Tunnels to Zip… into its exports/, then tunnel.sh extract)
   tunnel.sh import"
-    [ -s "$TSV" ] || die "No tunnels imported: tunnel.sh import (configs in ${CONFIGS}), or tunnel.sh extract-import (from an export zip)"
+    [ -s "$TSV" ] || die "No tunnels imported: tunnel.sh import (configs in ${TUNNELS}/<this Mac>/config), or tunnel.sh extract-import (from an export zip)"
 }
 
 check_installed() {
     if [ -x "$INSTALLED" ] && [ "$0" != "$INSTALLED" ] && ! cmp -s "$0" "$INSTALLED"; then
-        echo "Note: ${INSTALLED} differs from $0 — the next up/down/import updates it" >&2
+        echo "Note: ${INSTALLED} differs from $0 — tunnel.sh update (or the next up/down/import) updates it" >&2
     fi
 }
 
@@ -1048,6 +1050,19 @@ cmd_rotate_warp() {
     fi
 }
 
+# update: make the installed daemon this copy, only when it differs or its
+# LaunchDaemon is missing. Installing restarts the daemon: a tunnel that's up
+# drops for a few seconds, then comes back.
+cmd_update() {
+    [ "$0" != "$INSTALLED" ] || die "update: run the repo's scripts/tunnel.sh, not ${INSTALLED}"
+    if [ -x "$INSTALLED" ] && cmp -s "$0" "$INSTALLED" && [ -f "$PLIST" ]; then
+        echo "Daemon up to date: ${INSTALLED}"
+        return 0
+    fi
+    echo "Updating ${INSTALLED} from $0 (restarts the daemon: a tunnel that's up drops for a few seconds)"
+    sudo "$0" _install "$0"
+}
+
 cmd_breakglass() {
     echo "Breakglass: stop every tunnel and put the normal connection back"
     stop_app_tunnels
@@ -1168,13 +1183,14 @@ cmd_import() {
 case "${1:-status}" in
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
-    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | default [device] | install | uninstall | rotate-warp | log | breakglass" ;;
+    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | default [device] | update | install | uninstall | rotate-warp | log | breakglass" ;;
     list)      echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other ;;
     extract)   cmd_extract "$2" ;;
     import)    shift; cmd_import "$@" ;;
     extract-import) cmd_extract "$2" && cmd_import ;;
     rotate-warp) cmd_rotate_warp ;;
     default)   cmd_default "$2" ;;
+    update)    cmd_update ;;
     install)   sudo "$0" _install "$0" ;;
     uninstall) [ -x "$INSTALLED" ] && sudo "$INSTALLED" _uninstall ;;
     log)       tail -f "$LOG" ;;
@@ -1185,5 +1201,5 @@ case "${1:-status}" in
     _install)  cmd_install_root "$2" ;;
     _uninstall) cmd_uninstall_root ;;
     _breakglass) cmd_breakglass_root ;;
-    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | default [device] | install | uninstall | rotate-warp | log | breakglass" >&2; exit 1 ;;
+    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | default [device] | update | install | uninstall | rotate-warp | log | breakglass" >&2; exit 1 ;;
 esac
