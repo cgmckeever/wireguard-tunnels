@@ -18,7 +18,8 @@
 #   config/     every tunnel on the device: warped.<carrier>.conf (from the
 #               sweep), and plain configs you put there, used as they are
 #   sing-box/   what build writes, to import in the device's sing-box app:
-#                 composite.<device>.json   every tunnel, picked in the app
+#                 <device>.json             the composite: every tunnel,
+#                                           picked in the app
 #                 <server>.all.<device>.json  one server's tunnels, from the
 #                                           first word of their names (dengar.*,
 #                                           proton.*; warped.* and warp go in
@@ -57,6 +58,7 @@ device_dir() {
     [ -n "$1" ] || die "a device name, please (singbox.sh $2 <device>)"
     [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] \
         || die "device names are letters, digits, . _ - (not starting with .)"
+    [ "$1" != warp ] || die "a device can't be named warp: warp.json is the WARP-only profile"
     echo "$TUNNELS_DIR/$1"
 }
 
@@ -279,7 +281,7 @@ check_tags() {
     dup=$( { printf '%s\n' "${unit_eps[@]}" | jq -r '.[].tag'; echo tunnel; } | sort | uniq -d | paste -sd' ' -)
     [ -z "$dup" ] || die "more than one tunnel would be named: $dup (rename the config; \"tunnel\", \"warp\" and \"carrier.<name>\" are taken)"
     case " ${tags[*]} " in
-        *" composite.$1 "*) die "a tunnel can't be named composite.$1 (rename the config)" ;;
+        *" $1 "*) die "a tunnel can't be named $1: $1.json is the composite (rename the config)" ;;
     esac
     local t
     for t in "${tags[@]}"; do
@@ -440,7 +442,7 @@ cmd_build() {
         written+="$out "
     done
     # The composite: every tunnel
-    out="composite.$name.json"
+    out="$name.json"
     stage_group "$dir/sing-box/$out" "${!tags[@]}"
     written+="$out "
     # Groups: <server>.all.<device> for each first word of the tunnels' names

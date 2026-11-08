@@ -469,7 +469,7 @@ device yet, or another one? `singbox.sh new <device>` first):
    singbox.sh build iphone
    ```
 3. **On the phone**, install the sing-box app (1.12 or later), then AirDrop
-   `composite.iphone.json` to it and open it in the app: every tunnel, with a
+   `iphone.json` to it and open it in the app: every tunnel, with a
    picker. More in [Getting a profile to the device](#getting-a-profile-to-the-device).
 
 ### Which profile to import
@@ -478,7 +478,7 @@ device yet, or another one? `singbox.sh new <device>` first):
 
 | Profile | What's in it | Switching tunnels |
 |---------|--------------|-------------------|
-| `composite.<device>.json` | Every tunnel (warped ones first, `warp` last) | In the app's picker, without dropping the VPN |
+| `<device>.json` (the composite) | Every tunnel (warped ones first, `warp` last) | In the app's picker, without dropping the VPN |
 | `<group>.all.<device>.json` | One group of tunnels (below) | In the picker, as in the composite |
 | `<tunnel>.json` (e.g. `warped.proton.chicago.json`, `dengar.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
 
@@ -579,7 +579,7 @@ carrier copied from a config in `config/`, say) only gets a note: a device
 runs one tunnel at a time.
 
 **Names.** These tunnel names are reserved: `tunnel`, `warp`,
-`composite.<device>`, `<group>.all.<device>` and `carrier.<carrier>`.
+`<device>` (the composite), `<group>.all.<device>` and `carrier.<carrier>`.
 
 **Profiles.**
 
