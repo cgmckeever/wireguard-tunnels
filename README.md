@@ -83,21 +83,25 @@ On your Mac (macOS and [Homebrew](https://brew.sh) needed):
    git clone https://github.com/cgmckeever/wireguard-tunnels.git ~/Documents/code/wireguard-tunnels
    ```
    It can live anywhere; this README uses `~/Documents/code/wireguard-tunnels`.
-2. **Install one of the two.** Run it as yourself, not with `sudo`.
+2. **Install.** Run it as yourself, not with `sudo`:
    ```sh
    cd ~/Documents/code/wireguard-tunnels
-   ./install.sh              # Local Mac Tunnels (and all Sing-Box Device Tunnels need)
-   ./install.sh --sing-box   # Sing-Box Device Tunnels only
+   ./install.sh
    ```
-   Which one: if you want **this Mac's** traffic tunneled, `./install.sh`;
-   add `--swiftbar` for the menu bar lock. If you only want tunnels on
-   **phones, tablets or an Apple TV**, `./install.sh --sing-box`: no daemon,
-   no `sudo`, and the Mac's own connection is left alone. You can run the
-   full install later.
+   It asks which:
+   ```
+   1) Full Local Mac Tunnels (this Mac's traffic; sing-box devices too)
+   2) Only Sing-Box Device Tunnels (phones, Apple TV: no daemon, no sudo)
+   Choice [1]:
+   ```
+   Pick **1** if you want **this Mac's** traffic tunneled (add `--swiftbar`
+   for the menu bar lock). Pick **2** if you only want tunnels on **phones,
+   tablets or an Apple TV**: the Mac's own connection is left alone, and you
+   can run the full install later. (`./install.sh --sing-box` picks 2 without
+   asking.)
 
-   Both make your folders ([Your folders](#your-folders)): the full install
-   asks for this Mac's device name (`mbp-1`, say), `--sing-box` for a first
-   device (`iphone`, say).
+   Both make your folders ([Your folders](#your-folders)): 1 asks for this
+   Mac's device name (`mbp-1`, say), 2 for a first device (`iphone`, say).
 3. **Add tunnels:** [Mac quick start](#mac-quick-start) or
    [sing-box quick start](#sing-box-quick-start).
 
@@ -114,6 +118,9 @@ From here on this README writes just `tunnel.sh` and `singbox.sh`.
 
 Safe to re-run, e.g. after a `git pull`: each step checks first, changes only
 what's missing or out of date, and prints `ok` or `changed`.
+The 1-or-2 question comes only on a Mac without Local Mac Tunnels yet, in a
+terminal, with no options; otherwise it's the full install unless
+`--sing-box` is given.
 
 | Step | `install.sh` | `--sing-box` |
 |------|--------------|--------------|

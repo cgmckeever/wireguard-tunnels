@@ -7,6 +7,10 @@
 #   ./install.sh [--device <name>] [--swiftbar] [--no-daemon]
 #   ./install.sh --sing-box [--device <name>]
 #
+#   With no options, in a terminal, on a Mac without Local Mac Tunnels yet, it
+#   asks which: 1) Full Local Mac Tunnels (the default), 2) Only Sing-Box Device
+#   Tunnels. Any option, or no terminal, skips the question.
+#
 #   (default)     Local Mac Tunnels, and what Sing-Box Device Tunnels need too.
 #                 Homebrew packages wireguard-tools, wgcf and jq; this Mac's device
 #                 folder ~/wg-tunnels/devices/<name> (asked the first time, then
@@ -43,7 +47,7 @@ PLIST="/Library/LaunchDaemons/com.local.wg-tunnels.plist"
 SWIFTBAR_APP="/Applications/SwiftBar.app"
 SWIFTBAR_AGENT="$HOME/Library/LaunchAgents/com.local.swiftbar.plist"
 
-swiftbar=0 daemon=1 device="" singbox_only=0
+swiftbar=0 daemon=1 device="" singbox_only=0 opts=$#
 while [ $# -gt 0 ]; do
     case "$1" in
         --swiftbar)  swiftbar=1 ;;
@@ -63,6 +67,19 @@ ok() { printf '  ok       %s\n' "$*"; }
 changed() { printf '  changed  %s\n' "$*"; }
 
 [ "$(uname -s)" = Darwin ] || die "macOS only"
+# Which install, when nothing says: only asked before Local Mac Tunnels are
+# set up (no .default yet), so re-runs after a git pull don't ask
+if [ "$opts" = 0 ] && [ -t 0 ] && [ ! -f "$DEFAULT_FILE" ]; then
+    echo "Install:"
+    echo "  1) Full Local Mac Tunnels (this Mac's traffic; sing-box devices too)"
+    echo "  2) Only Sing-Box Device Tunnels (phones, Apple TV: no daemon, no sudo)"
+    read -rp "Choice [1]: " answer
+    case "${answer:-1}" in
+        1) ;;
+        2) singbox_only=1 ;;
+        *) die "1 or 2, please" ;;
+    esac
+fi
 [ "$singbox_only" = 0 ] || { [ "$swiftbar" = 0 ] && [ "$daemon" = 1 ]; } \
     || die "--sing-box takes only --device: it sets up no Local Mac Tunnels"
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
