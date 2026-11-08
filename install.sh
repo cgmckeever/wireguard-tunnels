@@ -5,8 +5,10 @@
 #
 # Usage:
 #   ./install.sh [--device <name>] [--swiftbar] [--no-daemon]
+#   ./install.sh --sing-box [--device <name>]
 #
-#   (default)     Homebrew packages wireguard-tools and wgcf; this Mac's device
+#   (default)     Mac tunnels, and what sing-box devices need too.
+#                 Homebrew packages wireguard-tools, wgcf and jq; this Mac's device
 #                 folder ~/wg-tunnels/devices/<name> (asked the first time, then
 #                 kept in ~/wg-tunnels/devices/.default);
 #                 a Cloudflare WARP account and $(brew --prefix)/etc/wireguard/warp.conf;
@@ -20,6 +22,12 @@
 #                 that keeps SwiftBar running (skipped if one already does)
 #   --no-daemon   Skip the daemon step (e.g. Ansible runs it separately with
 #                 become: scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>)
+#   --sing-box [--device <name>]
+#                 Only what building sing-box profiles needs (singbox.sh): wgcf,
+#                 jq, ~/wg-tunnels/devices and a first device (asked, or
+#                 --device; singbox.sh new makes more). No Mac tunnels: no
+#                 WARP account for this Mac, no daemon, no sudo. Run it again
+#                 without --sing-box to add Mac tunnels later
 #
 # Override the WARP endpoint with WARP_ENDPOINT (default 162.159.192.1:2408).
 
@@ -35,11 +43,12 @@ PLIST="/Library/LaunchDaemons/com.local.wg-tunnels.plist"
 SWIFTBAR_APP="/Applications/SwiftBar.app"
 SWIFTBAR_AGENT="$HOME/Library/LaunchAgents/com.local.swiftbar.plist"
 
-swiftbar=0 daemon=1 device=""
+swiftbar=0 daemon=1 device="" singbox_only=0
 while [ $# -gt 0 ]; do
     case "$1" in
         --swiftbar)  swiftbar=1 ;;
         --no-daemon) daemon=0 ;;
+        --sing-box)  singbox_only=1 ;;
         --device)    [ -n "${2:-}" ] || { echo "--device needs a name (see --help)" >&2; exit 1; }
                      device="$2"; shift ;;
         --device=*)  device="${1#--device=}" ;;
@@ -54,6 +63,8 @@ ok() { printf '  ok       %s\n' "$*"; }
 changed() { printf '  changed  %s\n' "$*"; }
 
 [ "$(uname -s)" = Darwin ] || die "macOS only"
+[ "$singbox_only" = 0 ] || { [ "$swiftbar" = 0 ] && [ "$daemon" = 1 ]; } \
+    || die "--sing-box takes only --device: it sets up no Mac tunnels"
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
 [ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
 
@@ -70,7 +81,10 @@ BREW_PREFIX="$(brew --prefix)"
 ok "brew ($BREW_PREFIX)"
 
 # wireguard-tools brings wg, wg-quick, wireguard-go and the bash wg-quick needs
-for pkg in wireguard-tools wgcf; do
+# (Mac tunnels); wgcf makes WARP accounts; jq writes sing-box profiles
+pkgs="wireguard-tools wgcf jq"
+[ "$singbox_only" = 1 ] && pkgs="wgcf jq"
+for pkg in $pkgs; do
     if brew list --formula "$pkg" >/dev/null 2>&1; then
         ok "$pkg"
     else
@@ -98,6 +112,32 @@ old_layout() {
   (and in each device folder: mv profiles sing-box)"
 }
 old_layout
+
+if [ "$singbox_only" = 1 ]; then
+    for d in "$TUNNELS_DIR" "$DEVICES"; do
+        if [ -d "$d" ] && [ "$(stat -f %Lp "$d")" = 700 ]; then
+            ok "$d"
+        else
+            mkdir -p "$d" && chmod 700 "$d" || die "Can't create $d"
+            changed "$d"
+        fi
+    done
+    if [ -z "$device" ] && [ -t 0 ]; then
+        read -rp "  First sing-box device name (e.g. iphone; Enter to skip): " device
+    fi
+    echo
+    if [ -n "$device" ]; then
+        echo "== device $device"
+        "$REPO/scripts/singbox.sh" new "$device" || die "singbox.sh new $device failed"
+    else
+        echo "Done (sing-box devices only). Next:"
+        echo "  $REPO/scripts/singbox.sh new <device>      e.g. iphone"
+        echo "  put its configs in $DEVICES/<device>/carriers (or config)"
+        echo "  $REPO/scripts/singbox.sh build <device>"
+    fi
+    echo "Mac tunnels later: $REPO/install.sh (without --sing-box)"
+    exit 0
+fi
 
 # This Mac's device: --device, else ~/wg-tunnels/devices/.default, else ask
 valid_name() { [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]]; }

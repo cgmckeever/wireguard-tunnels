@@ -25,7 +25,9 @@
 # also keep in the app.
 #
 # singbox.sh build runs it with SWEEP_FOR_SINGBOX=1: no WireGuard app column
-# and no "Next" lines, which are about this Mac's daemon.
+# and no "Next" lines, which are about this Mac's daemon. tunnel.sh import runs
+# it for this Mac with SWEEP_NO_NEXT=1 (no "Next: tunnel.sh import" line).
+# Neither needs it run by hand.
 #
 # Override the WARP endpoint with WARP_ENDPOINT (IPv4:port, default
 # 162.159.192.1:2408; only the address is used here).
@@ -94,9 +96,10 @@ valid() {
 
 # A carrier's AllowedIPs beyond the WARP endpoint come from these header lines:
 #   # device-network: 10.9.8.0/24     (the wireguard-tools server repo writes this)
-#   # wg-tunnels: also 10.0.0.5/32    (add your own; a "#" after them is a comment)
+#   # tunnel-routes: 10.0.0.5/32       (add your own; a "#" after them is a comment)
 # device-network is the server's static device addresses: with it the server
-# and this device reach each other through the carrier. Rebuilt every sweep:
+# and this device reach each other through the carrier. tunnel-routes is
+# anything else that should go through the carrier instead of WARP. Rebuilt every sweep:
 # delete a line and it's gone.
 #
 # extras <conf>: each entry on those lines as "<verdict> <entry>":
@@ -107,7 +110,7 @@ V4='^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$'
 V6='^[0-9A-Fa-f]*:[0-9A-Fa-f:.]*(/[0-9]{1,3})?$'
 extras() {
     local e p min max o1 o2 o3 o4
-    sed -nE 's/^#[[:space:]]*(device-network:|wg-tunnels:[[:space:]]*also)[[:space:]]*//p' "$1" \
+    sed -nE 's/^#[[:space:]]*(device-network|tunnel-routes):[[:space:]]*//p' "$1" \
         | sed 's/#.*//' | tr ', \t\r' '\n\n\n\n' | grep . | while read -r e; do
             if [[ "$e" =~ $V4 ]]; then min=8; max=32
                 # Each of the four numbers fits in a byte
@@ -241,5 +244,5 @@ done
 
 [ -n "$APP" ] || exit 0
 echo
-echo "Next: tunnel.sh import   (installs everything in ${CONFIG_DIR} for the daemon)"
+[ -n "$SWEEP_NO_NEXT" ] || echo "Next: tunnel.sh import   (installs everything in ${CONFIG_DIR} for the daemon)"
 echo "The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise."

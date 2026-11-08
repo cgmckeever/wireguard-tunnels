@@ -14,8 +14,9 @@
 #                           zip in exports/ (or the one given): the zip is the
 #                           authority, configs not in it are removed. The zip is kept.
 #   tunnel.sh import [dir] [-y]
-#                           Install every .conf in config/ (or dir) for the
-#                           daemon. Tunnels gone from it are removed.
+#                           Sweep carriers/ into config/ (wgwarp-sweep.sh; not
+#                           with a dir), then install every .conf in config/
+#                           (or dir) for the daemon. Tunnels gone from it are removed.
 #                           Shows what it would do and asks first (-y: don't ask).
 #   tunnel.sh default [device]
 #                           Show or pick this Mac's device folder (asked the
@@ -342,7 +343,7 @@ cmd_import_root() {
         fi
         kind=$(kind_of "$name" "$f")
         if [ "$kind" = warped ] && ! why=$(swept_ok "$f" "$wep"); then
-            printf '%-28s %-7s %-6s %s\n' "$name" "$kind" - "skipped: ${why} (run wgwarp-sweep.sh)"
+            printf '%-28s %-7s %-6s %s\n' "$name" "$kind" - "skipped: ${why} (not as the sweep writes it: is its carrier in carriers/?)"
             continue
         fi
         host=$(conf_val "$f" Endpoint | host_of)
@@ -1174,15 +1175,28 @@ cmd_extract() {
 
 # import [dir]: install every .conf in this Mac's config/ (or dir) for the
 # daemon. Tunnels no longer there are removed (unless up right now).
+# Without a dir it first sweeps this Mac's carriers/ into config/
+# (wgwarp-sweep.sh), as singbox.sh build does for its devices.
 # import [dir] [-y]: shows what it would do and asks first; -y, or no terminal
 # (the menu bar), goes ahead without asking
 cmd_import() {
-    local src="" yes="" a f n=0 answer
+    local src="" yes="" a f n=0 answer dir sweep
     for a in "$@"; do
         case "$a" in -y|--yes) yes=1 ;; "") ;; *) src="$a" ;; esac
     done
-    [ -n "$src" ] || { src=$(mac_dir) || exit 1; src="$src/config"; }
     [ -n "$WGT_TEST" ] || [ -x "$INSTALLED" ] || die "Not installed — run install.sh (or tunnel.sh install for just the daemon)"
+    if [ -z "$src" ]; then
+        dir=$(mac_dir) || exit 1
+        src="$dir/config"
+        # The repo's sweep, beside this script (the daemon's copy has none)
+        sweep="$(dirname "$0")/wgwarp-sweep.sh"
+        if ls "$dir"/carriers/*.conf >/dev/null 2>&1; then
+            [ -x "$sweep" ] || die "Can't sweep $dir/carriers: no $sweep (run tunnel.sh from the repo)"
+            echo "Sweeping ${dir}/carriers into ${src}"
+            SWEEP_NO_NEXT=1 "$sweep" "$dir" || die "Sweep failed: nothing imported"
+            echo
+        fi
+    fi
     check_installed
     [ -d "$src" ] || die "No folder ${src} — tunnel.sh extract (from an export zip), or put .conf files there"
     for f in "$src"/*.conf; do [ -f "$f" ] && n=$((n + 1)); done
@@ -1193,7 +1207,7 @@ cmd_import() {
         if [ -n "$WGT_TEST" ]; then "$0" _import "$src" dry; else sudo "$0" _import "$src" dry; fi || return 1
         echo
         read -rp "Go ahead? [y/N] " answer
-        [[ "$answer" =~ ^[Yy] ]] || { echo "Nothing changed"; return 1; }
+        [[ "$answer" =~ ^[Yy] ]] || { echo "Nothing imported"; return 1; }
         echo
     fi
     echo "Importing from ${src}"

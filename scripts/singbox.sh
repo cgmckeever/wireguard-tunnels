@@ -73,7 +73,7 @@ old_layout() {
 quiet_wgcf() {
     local dir="$1" output
     shift
-    command -v wgcf >/dev/null || die "wgcf missing (install.sh, or brew install wgcf)"
+    command -v wgcf >/dev/null || die "wgcf missing (install.sh --sing-box, or brew install wgcf)"
     output=$(cd "$dir" && wgcf "$@" 2>&1) || { echo "$output" >&2; die "wgcf $1 failed"; }
 }
 
@@ -193,7 +193,7 @@ route_rules() {
 unit_add() { tags+=("$1"); unit_eps+=("$2"); unit_rules+=("$3"); unit_mtu+=("$4"); }
 
 # add_warped <conf> <tag> <carrier MTU> <WARP profile>: WARP detoured through
-# the carrier. The carrier's extras (device-network, also) need a rule:
+# the carrier. The carrier's extras (device-network, tunnel-routes) need a rule:
 # AllowedIPs doesn't route in sing-box, so without one they'd go into WARP. In
 # the composite profile the rule applies whichever tunnel is picked, so a
 # network two carriers claim goes to the first.
@@ -359,7 +359,7 @@ cmd_build() {
     dir=$(device_dir "$name" build) || exit 1
     setup="$HERE/singbox.sh new $name"; [ "$name" = "$MAC" ] && setup="install.sh"
     [ -d "$dir" ] || die "no device $dir ($setup)"
-    command -v jq >/dev/null || die "jq missing (brew install jq)"
+    command -v jq >/dev/null || die "jq missing (install.sh --sing-box, or brew install jq)"
     profile="$dir/warp/wgcf-profile.conf"
     [ -f "$profile" ] || die "no WARP profile in $dir/warp ($setup)"
     why=$(unusable "$profile"); [ -z "$why" ] || die "WARP profile $profile: $why"
