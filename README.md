@@ -160,8 +160,8 @@ configs name the device (wireguard-tools' `dengar.mbp-1.conf` belongs in
 | `carriers/` | Carrier configs, as downloaded from your provider or server: each becomes a [warped tunnel](#warped-tunnels), `config/warped.<name>.conf` | both |
 | `config/` | Every tunnel, one `.conf` each; the file name is the tunnel name. Plain configs go here as they are; the `warped.*` files are written for you | both |
 | `warp/` | The device's own WARP account (`wgcf-account.toml`, `wgcf-profile.conf`) | both |
-| `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*, for `tunnel.sh extract` | Local Mac Tunnels |
-| `sing-box/` | The profiles `singbox.sh build` writes, to import in the app | Sing-Box Device Tunnels |
+| `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*, if you keep tunnels there ([extract](#tunnelsh)) | Local Mac Tunnels |
+| `sing-box/` | The sing-box profiles built from `config/`, to import in the app | Sing-Box Device Tunnels |
 
 They're all `0700`: everything in `~/wg-tunnels` holds private keys. Nothing
 here sends them anywhere; only the sing-box profiles you send yourself leave
@@ -178,50 +178,27 @@ WARP keys work the same way, which is why each device has its own WARP
 account: `install.sh` registers this Mac's, `singbox.sh new` each other
 device's.
 
-`singbox.sh build` stops on a key shared with another device, and names the
-files (never the key). A key used twice on one device (a carrier copied from a
-config in `config/`, say) only gets a note: a device runs one tunnel at a
-time.
-
 ## Warped tunnels
 
-Both setups turn carriers into warped tunnels the same way, and neither needs
-an extra step: put the carrier's config in the device's `carriers/`, and the
-setup's usual command sweeps it into `config/` before doing anything else.
+A warped tunnel starts as a carrier: an ordinary WireGuard config from your
+provider or server, saved in the device's `carriers/`. Each setup turns every
+carrier into a warped tunnel in `config/` for you, whenever it updates its
+tunnels; this step is called the *sweep*. How each setup runs it is in its own
+section ([Local Mac Tunnels](#warped-tunnels-on-this-mac),
+[Sing-Box Device Tunnels](#what-build-accepts-and-writes)).
 
-| | Local Mac Tunnels | Sing-Box Device Tunnels |
-|---|---|---|
-| Put carriers in | `~/wg-tunnels/devices/<mac>/carriers/` | `~/wg-tunnels/devices/<device>/carriers/` |
-| Swept by | `tunnel.sh import` | `singbox.sh build <device>` |
-| Then | installs `config/` for the daemon | turns `config/` into profiles |
-
-The sweep itself is `scripts/wgwarp-sweep.sh`. You only run it by hand to see
-its report: `wgwarp-sweep.sh` for this Mac's device, `wgwarp-sweep.sh iphone`
-for another.
-
-**What it writes.** `carriers/chicago.conf` becomes
+**What the sweep writes.** `carriers/chicago.conf` becomes
 `config/warped.chicago.conf`, with `AllowedIPs` set to the WARP endpoint
 (plus [extras](#extras)), the `DNS` line removed, and
 `PersistentKeepalive = 25`, so the carrier carries WARP and nothing else. The
-`warped.` prefix is what marks it as warped. For Local Mac Tunnels only, the
-report also says, per tunnel, what to do about the WireGuard app's copy, if
-you keep one there.
+`warped.` prefix is what marks a tunnel as warped.
 
-**Edit the carrier, not the warped file.** Every sweep writes `config/warped.*`
-again from `carriers/` (only when it changes). `x.conf`, `warped.x.conf` and
+**Edit the carrier, not the warped file.** Every sweep writes the warped file
+again from its carrier (only when it changes). `x.conf`, `warped.x.conf` and
 `warped-x.conf` in `carriers/` all become `warped.x`; only the first is used
-and the rest are reported. Other files in `config/` are left alone and
-reported: a `warped.*` file whose carrier is gone as `orphan`, anything else
-(a plain tunnel) as `manual`.
-
-**When a warped tunnel is skipped:**
-
-- **Local Mac Tunnels:** `tunnel.sh import` skips a `warped.*` file that no
-  longer looks swept (the WARP endpoint missing from `AllowedIPs`, an entry
-  wider than a /8 or /16 for IPv6, or a `DNS` line): usually one edited by
-  hand. An orphan still looks swept, so it's imported until you delete it.
-- **Sing-Box Device Tunnels:** `singbox.sh build` skips a `warped.*` file
-  whose carrier is missing from `carriers/` or unusable, orphans included.
+and the rest are reported. Other files in `config/` are left alone: a
+`warped.*` file whose carrier is gone is reported as an *orphan* (delete it
+yourself), anything else (a plain tunnel) as *manual*.
 
 ### Extras
 
@@ -238,8 +215,8 @@ these *extras* from two kinds of header line in the carrier file:
 wireguard-tools server repo, not the Homebrew package of the same name):
 `10.9.8.1` is the server, `10.9.8.<number>` a device.
 
-Extras are rebuilt every time: delete a line and they're gone on the next
-`tunnel.sh import` or `singbox.sh build`. A `#` after the addresses starts a
+Extras are rebuilt on every sweep: delete a line and they're gone the next
+time. A `#` after the addresses starts a
 comment. Entries wider than a /8 (/16 for IPv6) would take traffic away from
 WARP, so they're ignored and reported, as is anything that isn't an address
 (a hostname, a typo).
@@ -249,19 +226,20 @@ WARP, so they're ignored and reported, as is anything that isn't an address
 WARP's packets grow by up to 80 bytes inside the carrier. A carrier with an
 MTU under 1360 (a server set to 1280, say) can't fit WARP's 1280: ping works
 and nothing else does. Both setups handle it: WARP runs at the carrier's MTU
-minus 80 (1200 inside a 1280 carrier). The sweep flags these carriers, and
-the daemon logs it. Below 1280 there's no IPv6 inside WARP and QUIC falls
+minus 80 (1200 inside a 1280 carrier). The sweep's report flags these
+carriers. Below 1280 there's no IPv6 inside WARP and QUIC falls
 back to TCP; pages still load.
 
 ### WARP endpoint
 
-`WARP_ENDPOINT` (IPv4 `address:port`, default `162.159.192.1:2408`) sets
-where WARP connects. `install.sh`, `wgwarp-sweep.sh`, `singbox.sh` and
-`tunnel.sh rotate-warp` all read it, and they must agree: if the sweep used a
-different endpoint from the daemon's `warp.conf`, `import` skips every warped
-tunnel. To change it, export it in your shell profile, then re-run
-`install.sh` and `tunnel.sh import` (Local Mac Tunnels), or `singbox.sh build` for
-each sing-box device.
+WARP connects to `162.159.192.1:2408` unless `WARP_ENDPOINT` (IPv4
+`address:port`) says otherwise. `install.sh`, the sweep and `singbox.sh` read it; the sweep writes it
+into each warped tunnel, so all of a device's tunnels and its WARP side must
+agree. To change it, export it in your shell profile, then re-run
+`install.sh` and update every device's tunnels as its setup does:
+[import](#tunnelsh) on this Mac, [build](#singboxsh) for each sing-box device.
+On this Mac, warped tunnels whose endpoint doesn't match the WARP config are
+skipped until you do.
 
 ## Local Mac Tunnels
 
@@ -326,6 +304,23 @@ first when the repo copy differs, as `update` does.
 
 The kill switch blocks all traffic outside the tunnel until you run
 `tunnel.sh down`. A failing tunnel never falls back to your normal connection.
+
+### Warped tunnels on this Mac
+
+`tunnel.sh import` runs the [sweep](#warped-tunnels) on
+`~/wg-tunnels/devices/<mac>/carriers/` first, then installs everything in
+`config/`, so a new or changed carrier needs only an `import`. The sweep's
+report also says, per tunnel, what to do about the WireGuard app's copy, if
+you keep one there. To see that report without importing, run
+`scripts/wgwarp-sweep.sh`.
+
+`import` installs a `warped.*` file only if it still looks swept: the WARP
+endpoint in `AllowedIPs`, nothing wider than a /8 (/16 for IPv6), and no
+`DNS` line. One that fails (usually edited by hand) is skipped, not fixed. An
+orphan still looks swept, so it's imported until you delete it.
+
+The daemon starts WARP inside the carrier at the right MTU
+([Small carrier MTU](#small-carrier-mtu)) and logs when it lowers it.
 
 ### Menu bar (optional)
 
@@ -556,9 +551,20 @@ use, so a split config (a home LAN only, say) leaves the device with nothing
 past its own networks, not even DNS; `build` warns about one. `build` skips,
 and reports, a config it can't use: it needs `[Interface]`, one `[Peer]`, a
 `PrivateKey`, `PublicKey`, `Address`, an `Endpoint` as `host:port`, and a
-numeric `MTU` if one is set. It also skips a `warped.*` file whose carrier is
-missing from `carriers/` or broken. These tunnel names are reserved: `tunnel`,
-`warp`, `composite.<device>` and `carrier.<carrier>`.
+numeric `MTU` if one is set.
+
+**Warped tunnels.** `build` runs the [sweep](#warped-tunnels) on the device's
+`carriers/` first (`scripts/wgwarp-sweep.sh <device>` shows the same report on
+its own). It skips a `warped.*` file whose carrier is missing from
+`carriers/` or broken, so orphans drop out of the profiles.
+
+**Keys.** `build` stops on a key shared with another device, and names the
+files (never the key); see [Keys](#keys). A key used twice on one device (a
+carrier copied from a config in `config/`, say) only gets a note: a device
+runs one tunnel at a time.
+
+**Names.** These tunnel names are reserved: `tunnel`, `warp`,
+`composite.<device>` and `carrier.<carrier>`.
 
 **Profiles.**
 
