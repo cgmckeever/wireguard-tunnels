@@ -22,12 +22,14 @@
 #                 <tunnel>.json             one tunnel each
 #                 warp.json                 WARP alone, no carrier (in the
 #                                           composite too)
+#               build owns this folder: a .json it didn't write is removed
 #
 # This Mac is a device too (its folder is the one in devices/.default,
 # set by tunnel.sh default). Its profiles use the daemon's keys: run one or
 # the other, never both (tunnel.sh down before turning sing-box on).
 #
-# Override the WARP endpoint with WARP_ENDPOINT (default 162.159.192.1:2408).
+# Override the WARP endpoint with WARP_ENDPOINT (IPv4:port, default
+# 162.159.192.1:2408).
 
 set -o pipefail
 TUNNELS_DIR="$HOME/wg-tunnels/devices"
@@ -38,11 +40,11 @@ umask 077
 die() { echo "singbox.sh: $*" >&2; exit 1; }
 
 WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
-WARP_HOST="${WARP_ENDPOINT%:*}"; WARP_HOST="${WARP_HOST#[}"; WARP_HOST="${WARP_HOST%]}"
+[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
+    || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
+WARP_HOST="${WARP_ENDPOINT%:*}"
 WARP_PORT="${WARP_ENDPOINT##*:}"
-case "$WARP_HOST" in *:*) WARP_NET="$WARP_HOST/128" ;; *) WARP_NET="$WARP_HOST/32" ;; esac
-[[ "$WARP_PORT" =~ ^[0-9]+$ ]] && [ "$WARP_HOST" != "$WARP_ENDPOINT" ] \
-    || die "WARP_ENDPOINT is host:port, e.g. 162.159.192.1:2408"
+WARP_NET="$WARP_HOST/32"
 
 device_dir() {
     [ -n "$1" ] || die "a device name, please (singbox.sh $2 <device>)"
@@ -51,10 +53,14 @@ device_dir() {
     echo "$TUNNELS_DIR/$1"
 }
 
-# old_layout: stop on ~/wg-tunnels/local and sing-box/<device>, from before
-# every device had its own folder in devices/
+# old_layout: stop on a layout from before ~/wg-tunnels/devices/ (nothing is
+# moved for you). The same function is in tunnel.sh, wgwarp-sweep.sh and install.sh.
 old_layout() {
-    local top="$HOME/wg-tunnels"
+    local top="$HOME/wg-tunnels" d
+    for d in carriers config exports warp; do
+        [ -e "$top/$d" ] && die "$top/$d is an old layout: this Mac's folders go in $top/devices/<this Mac's name, e.g. mbp-1>. Move it first:
+  mkdir -p $top/devices/<name> && mv $top/$d $top/devices/<name>/"
+    done
     [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
     die "$top has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
   mkdir -p $top/devices
@@ -67,6 +73,7 @@ old_layout() {
 quiet_wgcf() {
     local dir="$1" output
     shift
+    command -v wgcf >/dev/null || die "wgcf missing (install.sh, or brew install wgcf)"
     output=$(cd "$dir" && wgcf "$@" 2>&1) || { echo "$output" >&2; die "wgcf $1 failed"; }
 }
 
@@ -76,7 +83,6 @@ cmd_new() {
     for d in "${TUNNELS_DIR%/*}" "$TUNNELS_DIR" "$dir" "$dir/carriers" "$dir/warp" "$dir/config"; do
         mkdir -p "$d" && chmod 700 "$d" || die "can't create $d"
     done
-    command -v wgcf >/dev/null || die "wgcf missing (install.sh, or brew install wgcf)"
     if [ -f "$dir/warp/wgcf-account.toml" ]; then
         echo "WARP account: already there"
     else
@@ -95,23 +101,31 @@ cmd_new() {
 
 # --- reading configs ---
 
-# conf_val <file> <Key>: the first <Key>'s value, everything after the first
-# "=" (keys end in base64 "=" padding)
-conf_val() {
-    sed -nE "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*(.*[^[:space:]])[[:space:]]*$/\1/p" "$1" | head -1
+# conf_vals <file> <Key>: every <Key> line's value, everything after the first
+# "=" (keys end in base64 "=" padding). Keys in any case, as wg-quick reads them.
+conf_vals() {
+    awk -v k="$(tr '[:upper:]' '[:lower:]' <<< "$2")" '
+        { line = $0; sub(/\r$/, "", line) }
+        tolower(line) ~ "^[[:space:]]*" k "[[:space:]]*=" {
+            v = substr(line, index(line, "=") + 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            print v
+        }' "$1"
 }
+# conf_val <file> <Key>: the first <Key>'s value
+conf_val() { conf_vals "$1" "$2" | head -1; }
 # conf_list <file> <Key>: every value of every <Key> line, one per line
 conf_list() {
-    sed -nE "s/^[[:space:]]*$2[[:space:]]*=[[:space:]]*(.*)$/\1/p" "$1" \
-        | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep .
+    conf_vals "$1" "$2" | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep .
 }
 json_list() { jq -R . | jq -sc .; }
+count() { echo $#; }
 
 # unusable <conf>: why build can't turn a config into an endpoint, or nothing
 unusable() {
     local peers ep mtu
-    grep -q '^\[Interface\]' "$1" || { echo "no [Interface]"; return; }
-    peers=$(grep -c '^\[Peer\]' "$1")
+    grep -qi '^\[Interface\]' "$1" || { echo "no [Interface]"; return; }
+    peers=$(grep -ci '^\[Peer\]' "$1")
     [ "$peers" = 1 ] || { echo "${peers} [Peer] sections, needs one"; return; }
     [ -n "$(conf_val "$1" PrivateKey)" ] || { echo "no PrivateKey"; return; }
     [ -n "$(conf_val "$1" PublicKey)" ] || { echo "no PublicKey"; return; }
@@ -171,20 +185,24 @@ route_rules() {
 }
 
 # --- collecting tunnels. Each one is a unit: its tag, its endpoints (a JSON
-# list), its extra route rules and its tun MTU. These append to cmd_build's
-# lists (bash functions see their caller's locals). ---
+# list), its extra route rules and its tun MTU. These change cmd_build's
+# locals (bash functions see their caller's): unit_add appends to tags,
+# unit_eps, unit_rules and unit_mtu; add_warped also keeps cidrs_seen and
+# comp_rules (the composite's route rules). ---
 
 unit_add() { tags+=("$1"); unit_eps+=("$2"); unit_rules+=("$3"); unit_mtu+=("$4"); }
 
-# add_warped <conf> <tag> <carrier MTU>: WARP detoured through the carrier.
-# The carrier's extras (device-network, also) need a rule: AllowedIPs doesn't
-# route in sing-box, so without one they'd go into WARP. In the composite
-# profile the rule applies whichever tunnel is picked, so a network two
-# carriers claim goes to the first.
+# add_warped <conf> <tag> <carrier MTU> <WARP profile>: WARP detoured through
+# the carrier. The carrier's extras (device-network, also) need a rule:
+# AllowedIPs doesn't route in sing-box, so without one they'd go into WARP. In
+# the composite profile the rule applies whichever tunnel is picked, so a
+# network two carriers claim goes to the first.
 add_warped() {
-    local conf="$1" tag="$2" carrier="carrier.${2#warped.}" cidr eps
-    # The carrier adds up to 80 bytes to each WARP packet: run WARP 80 smaller
-    local wmtu=$(( $3 - 80 ))
+    local conf="$1" tag="$2" carrier="carrier.${2#warped.}" profile="$4" cidr eps wmtu
+    # WARP runs at its own MTU (1280 from wgcf), as on the Mac; the carrier adds
+    # up to 80 bytes to each WARP packet, so a carrier under that + 80 lowers it
+    wmtu=$(warp_mtu "$profile")
+    [ $(( $3 - 80 )) -lt "$wmtu" ] && wmtu=$(( $3 - 80 ))
     local own=() comp=()
     while read -r cidr; do
         own+=("$cidr")
@@ -210,12 +228,19 @@ add_plain() {
     unit_add "$2" "$eps" '[]' "$3"
 }
 
-# add_warp: WARP alone, straight from the device's network (no carrier): the
-# device's own WARP account, at the profile's MTU (1280 from wgcf)
+# warp_mtu <WARP profile>: its MTU (wgcf writes 1280)
+warp_mtu() {
+    local mtu
+    mtu=$(conf_val "$1" MTU); [[ "$mtu" =~ ^[0-9]+$ ]] || mtu=1280
+    echo "$mtu"
+}
+
+# add_warp <WARP profile>: WARP alone, straight from the device's network (no
+# carrier): the device's own WARP account, at its MTU
 add_warp() {
     local mtu eps
-    mtu=$(conf_val "$profile" MTU); [[ "$mtu" =~ ^[0-9]+$ ]] || mtu=1280
-    eps=$(warp_json "$profile" warp "" "$mtu" | jq -sc .) || die "can't read $profile"
+    mtu=$(warp_mtu "$1")
+    eps=$(warp_json "$1" warp "" "$mtu" | jq -sc .) || die "can't read $1"
     unit_add warp "$eps" '[]' "$mtu"
 }
 
@@ -258,12 +283,12 @@ $self" >&2
 }
 
 # check_tags <device>: endpoint names are unique ("tunnel" is the picker's,
-# "warp" the WARP-only tunnel's), and
-# no tunnel is named like the composite profile
+# "warp" the WARP-only tunnel's, carrier.<name> a warped tunnel's carrier),
+# and no tunnel is named like the composite profile
 check_tags() {
     local dup
     dup=$( { printf '%s\n' "${unit_eps[@]}" | jq -r '.[].tag'; echo tunnel; } | sort | uniq -d | paste -sd' ' -)
-    [ -z "$dup" ] || die "more than one tunnel would be named: $dup (rename the config; \"tunnel\" and \"warp\" are taken)"
+    [ -z "$dup" ] || die "more than one tunnel would be named: $dup (rename the config; \"tunnel\", \"warp\" and \"carrier.<name>\" are taken)"
     case " ${tags[*]} " in
         *" composite.$1 "*) die "a tunnel can't be named composite.$1 (rename the config)" ;;
     esac
@@ -272,7 +297,7 @@ check_tags() {
 # --- writing ---
 
 # Profiles are staged as temp files and only replace the old ones once every
-# one is written (and passes sing-box check): a failed build changes nothing.
+# one is written (and passes sing-box check): a failed check changes nothing.
 STAGED_TMP=() STAGED_OUT=()
 trap 'rm -f "${STAGED_TMP[@]}"' EXIT
 
@@ -320,7 +345,7 @@ commit_profiles() {
             rm -f "$tmp"; state=unchanged
         else
             state=new; [ -f "$out" ] && state=updated
-            mv "$tmp" "$out" || die "can't write $out"
+            mv "$tmp" "$out" || die "can't write $out (the profiles listed above were already replaced)"
         fi
         printf '%-44s %s\n' "$(basename "$out")" "$state"
     done
@@ -340,11 +365,15 @@ cmd_build() {
     why=$(unusable "$profile"); [ -z "$why" ] || die "WARP profile $profile: $why"
 
     echo "== Sweep $dir/carriers"
-    WARP_ENDPOINT="$WARP_ENDPOINT" "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"
+    WARP_ENDPOINT="$WARP_ENDPOINT" SWEEP_FOR_SINGBOX=1 "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"
     echo
 
     shopt -s nullglob
-    for conf in "$dir"/carriers/*.conf; do carrier_names+="$(warped_name "$conf") "; done
+    # Only carriers build could use: a broken one (the sweep skipped it) leaves
+    # its old warped.*.conf without a carrier, so it isn't built from that
+    for conf in "$dir"/carriers/*.conf; do
+        [ -z "$(unusable "$conf")" ] && carrier_names+="$(warped_name "$conf") "
+    done
     # Warped first: the composite's default (first) tunnel is a warped one when there is one
     files=("$dir"/config/warped.*.conf)
     for conf in "$dir"/config/*.conf; do
@@ -358,15 +387,15 @@ cmd_build() {
         case "$tag" in
             warped.*)
                 case "$carrier_names" in
-                    *" $tag "*) add_warped "$conf" "$tag" "$cmtu" ;;
-                    *) echo "skipped $tag: no carrier for it in carriers/ (delete it if that's for good)"; continue ;;
+                    *" $tag "*) add_warped "$conf" "$tag" "$cmtu" "$profile" ;;
+                    *) echo "skipped $tag: no usable carrier for it in carriers/ (delete it if that's for good)"; continue ;;
                 esac ;;
             *)  add_plain "$conf" "$tag" "$cmtu" ;;
         esac
         used+=("$conf")
     done
     [ ${#tags[@]} -gt 0 ] || die "nothing to build: put configs in $dir/carriers or $dir/config"
-    add_warp
+    add_warp "$profile"
     check_keys "$dir" "${used[@]}" "$profile"
     check_tags "$name"
 
@@ -417,7 +446,6 @@ cmd_build() {
 
 cmd_list() {
     local dir name
-    count() { echo $#; }
     shopt -s nullglob
     set -- "$TUNNELS_DIR"/*/
     [ $# -gt 0 ] || { echo "no devices yet ($HERE/singbox.sh new <device>)"; return; }
@@ -438,5 +466,6 @@ case "$1" in
     new)   cmd_new "$2" ;;
     build) cmd_build "$2" ;;
     list)  cmd_list ;;
+    -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0" ;;
     *)     sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 1 ;;
 esac

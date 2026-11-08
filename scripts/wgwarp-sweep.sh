@@ -6,7 +6,7 @@
 #   wgwarp-sweep.sh             this Mac's device folder (~/wg-tunnels/devices/
 #                               .default, set by tunnel.sh default): carriers/ -> config/
 #   wgwarp-sweep.sh <device>    ~/wg-tunnels/devices/<device> (singbox.sh build runs this)
-#   wgwarp-sweep.sh <dir>       any folder with carriers/ and config/
+#   wgwarp-sweep.sh <dir>       any folder with carriers/ in it
 #
 # Reads every carriers/<name>.conf (as downloaded from the provider) and writes
 # config/warped.<name>.conf: AllowedIPs set to the WARP endpoint (plus the
@@ -24,46 +24,72 @@
 # address is visible) and says what to do there by hand. Only for tunnels you
 # also keep in the app.
 #
-# Override the WARP endpoint with WARP_ENDPOINT (default 162.159.192.1:2408,
-# engage.cloudflareclient.com; only the address is used here).
+# singbox.sh build runs it with SWEEP_FOR_SINGBOX=1: no WireGuard app column
+# and no "Next" lines, which are about this Mac's daemon.
+#
+# Override the WARP endpoint with WARP_ENDPOINT (IPv4:port, default
+# 162.159.192.1:2408; only the address is used here).
 
 die() { echo "wgwarp-sweep.sh: $*" >&2; exit 1; }
+
+# old_layout: stop on a layout from before ~/wg-tunnels/devices/ (nothing is
+# moved for you). The same function is in tunnel.sh, singbox.sh and install.sh.
+old_layout() {
+    local top="$HOME/wg-tunnels" d
+    for d in carriers config exports warp; do
+        [ -e "$top/$d" ] && die "$top/$d is an old layout: this Mac's folders go in $top/devices/<this Mac's name, e.g. mbp-1>. Move it first:
+  mkdir -p $top/devices/<name> && mv $top/$d $top/devices/<name>/"
+    done
+    [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
+    die "$top has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
+  mkdir -p $top/devices
+  mv $top/local $top/devices/<this Mac's name, e.g. mbp-1>
+  mv $top/sing-box/* $top/devices/ && rmdir $top/sing-box
+  (and in each device folder: mv profiles sing-box)"
+}
 
 TUNNELS="$HOME/wg-tunnels/devices"
 MAC=$(cat "$TUNNELS/.default" 2>/dev/null)     # this Mac's device (tunnel.sh default)
 [ $# -le 1 ] || die "usage: wgwarp-sweep.sh [<device>|<dir>]"
 case "$1" in
-    "") [ -n "$MAC" ] || die "no default device yet: tunnel.sh default (or give a device or folder)"
-        DIR="$TUNNELS/$MAC" ;;
+    -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
     -*) die "usage: wgwarp-sweep.sh [<device>|<dir>]" ;;
+    "") old_layout
+        [ -n "$MAC" ] || die "no default device yet: tunnel.sh default (or give a device or folder)"
+        DIR="$TUNNELS/$MAC" ;;
     */*|.|..) DIR="$1" ;;
     *)  DIR="$TUNNELS/$1"; [ -d "$DIR" ] || DIR="$1" ;;
 esac
 [ -d "$DIR" ] || die "no folder $DIR"
-# The WireGuard app column: this Mac's device only
+# Only a device folder gets swept: never make carriers/ and config/ (and chmod
+# 700) in some other folder that was named by mistake
+[ -d "$DIR/carriers" ] || die "no carriers/ in $DIR (singbox.sh new <device> makes a device)"
+# The WireGuard app column: this Mac's device only, and not for singbox.sh
 APP=""
-[ -n "$MAC" ] && [ -d "$TUNNELS/$MAC" ] \
+[ -z "$SWEEP_FOR_SINGBOX" ] && [ -n "$MAC" ] && [ -d "$TUNNELS/$MAC" ] \
     && [ "$(cd "$DIR" && pwd -P)" = "$(cd "$TUNNELS/$MAC" && pwd -P)" ] && APP=1
 CARRIER_DIR="$DIR/carriers"
 CONFIG_DIR="$DIR/config"
 WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
-WARP_HOST="${WARP_ENDPOINT%:*}"; WARP_HOST="${WARP_HOST#[}"; WARP_HOST="${WARP_HOST%]}"
-case "$WARP_HOST" in *:*) WARP_NET="$WARP_HOST/128" ;; *) WARP_NET="$WARP_HOST/32" ;; esac
+[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
+    || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
+WARP_NET="${WARP_ENDPOINT%:*}/32"
 
 # These hold private keys
 umask 077
-mkdir -p "$CARRIER_DIR" "$CONFIG_DIR" || die "can't create $CARRIER_DIR or $CONFIG_DIR"
+mkdir -p "$CONFIG_DIR" || die "can't create $CONFIG_DIR"
 chmod 700 "$DIR" "$CARRIER_DIR" "$CONFIG_DIR"
 
 # warped_name <carrier file>: the tunnel it becomes (x.conf, warped.x.conf and
 # warped-x.conf all become warped.x). singbox.sh has the same one-liner.
 warped_name() { echo "warped.$(basename "$1" .conf | sed -E 's/^warped[.-]//')"; }
 
-# valid <conf>: a one-peer client config with a key and an endpoint
+# valid <conf>: a one-peer client config with a key and an endpoint (keys in
+# any case, as wg-quick and tunnel.sh read them)
 valid() {
-    grep -q '^\[Interface\]' "$1" && [ "$(grep -c '^\[Peer\]' "$1")" = 1 ] \
-        && grep -qE '^[[:space:]]*PrivateKey[[:space:]]*=' "$1" \
-        && grep -qE '^[[:space:]]*Endpoint[[:space:]]*=' "$1"
+    grep -qi '^\[Interface\]' "$1" && [ "$(grep -ci '^\[Peer\]' "$1")" = 1 ] \
+        && grep -qiE '^[[:space:]]*PrivateKey[[:space:]]*=' "$1" \
+        && grep -qiE '^[[:space:]]*Endpoint[[:space:]]*=' "$1"
 }
 
 # A carrier's AllowedIPs beyond the WARP endpoint come from these header lines:
@@ -80,10 +106,14 @@ valid() {
 V4='^[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?$'
 V6='^[0-9A-Fa-f]*:[0-9A-Fa-f:.]*(/[0-9]{1,3})?$'
 extras() {
-    local e p min max
+    local e p min max o1 o2 o3 o4
     sed -nE 's/^#[[:space:]]*(device-network:|wg-tunnels:[[:space:]]*also)[[:space:]]*//p' "$1" \
         | sed 's/#.*//' | tr ', \t\r' '\n\n\n\n' | grep . | while read -r e; do
             if [[ "$e" =~ $V4 ]]; then min=8; max=32
+                # Each of the four numbers fits in a byte
+                IFS=./ read -r o1 o2 o3 o4 _ <<< "$e"
+                [ "$o1" -le 255 ] && [ "$o2" -le 255 ] && [ "$o3" -le 255 ] && [ "$o4" -le 255 ] \
+                    || { echo "bad $e"; continue; }
             elif [[ "$e" =~ $V6 ]]; then min=16; max=128
             else echo "bad $e"; continue
             fi
@@ -103,13 +133,13 @@ extras_of() { extras "$1" | sed -n "s/^$2 //p"; }
 render() {
     local allowed="$WARP_NET" e has=0
     while read -r e; do allowed+=", $e"; done < <(extras_of "$1" kept)
-    grep -qE '^[[:space:]]*AllowedIPs[[:space:]]*=' "$1" && has=1
+    grep -qiE '^[[:space:]]*AllowedIPs[[:space:]]*=' "$1" && has=1
     awk -v allowed="$allowed" -v has="$has" '
-        { sub(/\r$/, "") }
-        /^[[:space:]]*DNS[[:space:]]*=/                 { next }
-        /^[[:space:]]*PersistentKeepalive[[:space:]]*=/ { next }
-        /^[[:space:]]*AllowedIPs[[:space:]]*=/ { if (!done) print "AllowedIPs = " allowed; done = 1; next }
-        /^[[:space:]]*Endpoint[[:space:]]*=/ {
+        { sub(/\r$/, ""); l = tolower($0) }
+        l ~ /^[[:space:]]*dns[[:space:]]*=/                 { next }
+        l ~ /^[[:space:]]*persistentkeepalive[[:space:]]*=/ { next }
+        l ~ /^[[:space:]]*allowedips[[:space:]]*=/ { if (!done) print "AllowedIPs = " allowed; done = 1; next }
+        l ~ /^[[:space:]]*endpoint[[:space:]]*=/ {
             print
             if (!has) print "AllowedIPs = " allowed
             print "PersistentKeepalive = 25"
@@ -120,7 +150,7 @@ render() {
 }
 
 endpoint_of() {
-    awk -F'[[:space:]]*=[[:space:]]*' '/^[[:space:]]*Endpoint[[:space:]]*=/ {print $2; exit}' "$1"
+    awk -F'[[:space:]]*=[[:space:]]*' 'tolower($0) ~ /^[[:space:]]*endpoint[[:space:]]*=/ {print $2; exit}' "$1"
 }
 
 # app_action <name> <endpoint> <new|updated|unchanged>: what to do about the
@@ -164,15 +194,15 @@ names=" "                       # every warped name a carrier claims
 for raw in "${raws[@]}"; do
     name=$(warped_name "$raw")
     out="$CONFIG_DIR/${name}.conf"
+    # Checked first: a broken carrier doesn't take the name from a good one
+    if ! valid "$raw"; then
+        row "$name" "skipped" "$(basename "$raw"): not a one-peer WireGuard config (Interface, one Peer, PrivateKey, Endpoint)"
+        continue
+    fi
     case "$names" in
         *" $name "*) row "$name" "skipped" "$(basename "$raw"): another carrier already makes $name"; continue ;;
     esac
     names+="$name "
-
-    if ! valid "$raw"; then
-        row "$name" "skipped" "not a one-peer WireGuard config (Interface, one Peer, PrivateKey, Endpoint)"
-        continue
-    fi
 
     tmp=$(mktemp "$CONFIG_DIR/.render.XXXXXX") || die "mktemp failed in $CONFIG_DIR"
     render "$raw" > "$tmp" || { rm -f "$tmp"; die "can't render $raw"; }
@@ -190,7 +220,7 @@ for raw in "${raws[@]}"; do
     e=$(extras_of "$raw" bad | list);  [ -n "$e" ] && note "ignored, not an address: ${e}"
     # WARP needs 1280 inside (IPv6's minimum), so a carrier under 1360 makes
     # tunnel.sh and singbox.sh run it at the carrier's MTU - 80
-    mtu=$(sed -nE 's/^[[:space:]]*MTU[[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$out" | head -1)
+    mtu=$(sed -nE 's/^[[:space:]]*[Mm][Tt][Uu][[:space:]]*=[[:space:]]*([0-9]+).*/\1/p' "$out" | head -1)
     if [ -n "$mtu" ] && [ "$mtu" -lt 1360 ]; then
         note "carrier MTU ${mtu}: WARP runs at $((mtu - 80)) inside (IPv6 and QUIC fall back)"
     fi
@@ -202,8 +232,8 @@ done
 for out in "$CONFIG_DIR"/*.conf; do
     name=$(basename "$out" .conf)
     case "$names" in *" $name "*) continue ;; esac
-    if grep -qE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_NET//./\\.}([[:space:]]*,.*)?[[:space:]]*$" "$out"; then
-        row "$name" "orphan" "(no carrier in carriers/: left in place)"
+    if grep -qiE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_NET//./\\.}([[:space:]]*,.*)?[[:space:]]*$" "$out"; then
+        row "$name" "orphan" "(no usable carrier in carriers/: left in place)"
     else
         row "$name" "manual" "$(app_action "$name" "$(endpoint_of "$out")" "unchanged")"
     fi

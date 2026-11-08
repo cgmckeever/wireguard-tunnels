@@ -113,8 +113,9 @@ first, changes only what's missing or out of date, and prints `ok` or
 | `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar (Homebrew cask), the plugin and a LaunchAgent that keeps SwiftBar running |
 | `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt (e.g. Ansible). Install the daemon separately as root: `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
 
-`WARP_ENDPOINT` (`host:port`, default `162.159.192.1:2408`, IPv4) is where
-`warp.conf` points: `WARP_ENDPOINT=host:port ./install.sh`. `wgwarp-sweep.sh`,
+`WARP_ENDPOINT` (an IPv4 address and port, default `162.159.192.1:2408`; the
+scripts refuse anything else) is where `warp.conf` points:
+`WARP_ENDPOINT=ip:port ./install.sh`. `wgwarp-sweep.sh`,
 `singbox.sh` and `tunnel.sh rotate-warp` (which re-runs `install.sh`) read it
 too, and it has to be the same for all of them, or `import` skips every warped
 tunnel. If you change it, export it in your shell profile.
@@ -206,7 +207,7 @@ For an iPhone or Apple TV, see [sing-box devices](#sing-box-devices).
 | `list` | Number the warped and other tunnels |
 | `import [dir] [-y]` | Install every `.conf` in `~/wg-tunnels/devices/<mac>/config` (or `dir`) for the daemon and work out each one's kind. Tunnels no longer there are removed, unless up right now. First shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y` (or no terminal, as from the menu bar) skips the question |
 | `extract [zip]` | Replace `~/wg-tunnels/devices/<mac>/config` with the `.conf` files in the newest zip in `~/wg-tunnels/devices/<mac>/exports` (or the one given). The zip is the authority: configs not in it are removed. The zip is kept |
-| `extract-import` | `extract`, then `import` |
+| `extract-import [zip]` | `extract`, then `import` |
 | `default [device]` | Show or change this Mac's device folder ([Your folders](#your-folders)). Asked the first time a command needs it |
 | `rotate-warp` | New Cloudflare WARP keys: registers a new WARP account (through `install.sh`), imports it, and reconnects a warped tunnel that's up. The old account's files are deleted once that works (Cloudflare isn't told), or put back if registering fails. This Mac only: sing-box devices keep their own accounts |
 | `log` | Follow the daemon's log |
@@ -226,8 +227,8 @@ differs, as `update` does on its own.
 configs in `~/wg-tunnels/devices/<mac>/` into warped ones; see
 [Warped tunnels](#warped-tunnels). For each one it also says what to do about
 the WireGuard app's copy, if you keep one there. Given another device
-(`wgwarp-sweep.sh iphone`) or a folder, it sweeps that one's `carriers/` into
-its `config/` instead, with nothing about the app: that's how `singbox.sh
+(`wgwarp-sweep.sh iphone`) or a folder with a `carriers/` in it, it sweeps
+that one's `carriers/` into its `config/` instead, with nothing about the app: that's how `singbox.sh
 build` sweeps a [sing-box device](#sing-box-devices). It reads `WARP_ENDPOINT`, as
 [install.sh](#install) does.
 
@@ -240,7 +241,7 @@ build` sweeps a [sing-box device](#sing-box-devices). It reads `WARP_ENDPOINT`, 
 |---------|------|
 | `new <device>` | Make `~/wg-tunnels/devices/<device>/` and register the device's own WARP account (needs `wgcf`) |
 | `build <device>` | Sweep its carriers, then write its profiles into its `sing-box/` (needs `jq`). This Mac is a device too ([sing-box on this Mac](#sing-box-on-this-mac)) |
-| `list` | The devices, with how many carriers, tunnels and profiles each has |
+| `list` | The devices: how many carriers, tunnels and profiles each has, whether it has a WARP account, and which is this Mac |
 
 It reads `WARP_ENDPOINT`, as [install.sh](#install) does.
 
@@ -336,7 +337,7 @@ networks, not even DNS; `build` warns about one.
 
 `build` skips, and reports, a config it can't use: it needs one `[Peer]`, a
 `PrivateKey`, `PublicKey`, `Address` and an `Endpoint` as `host:port`. It also
-skips a `warped.*` file whose carrier is gone from `carriers/`. A few names are
+skips a `warped.*` file whose carrier is gone from `carriers/` or broken. A few names are
 taken: `tunnel`, `warp`, `composite.<device>` and `carrier.<carrier>`.
 
 ### Keys
@@ -354,7 +355,8 @@ WARP key, which is why `new` gives each device its own WARP account.
 ### Which profile to import
 
 A profile is one file you import in the sing-box app; the app runs one profile
-at a time. `build` writes two kinds into `sing-box/`:
+at a time. `build` writes two kinds into `sing-box/`, and owns that folder: a
+`.json` there that it didn't write is removed.
 
 | Profile | What's in it | Switching tunnels |
 |---------|--------------|-------------------|
@@ -413,8 +415,9 @@ A carrier taken out of `carriers/` leaves the profiles, but its
 
 ### What build puts in a profile
 
-- A `warped.<carrier>` is WARP detoured through that carrier, at the carrier's
-  MTU minus 80. `warp` is the same WARP endpoint with no carrier, at 1280.
+- A `warped.<carrier>` is WARP detoured through that carrier, at 1280 as on
+  the Mac, or the carrier's MTU minus 80 when that's smaller. `warp` is the
+  same WARP endpoint with no carrier, at 1280.
   Any other config is an endpoint as it stands.
 - DNS goes to 1.1.1.1 through the tunnel in use, whatever a config's own `DNS`
   line says.

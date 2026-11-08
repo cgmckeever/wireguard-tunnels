@@ -20,7 +20,7 @@
 #   tunnel.sh default [device]
 #                           Show or pick this Mac's device folder (asked the
 #                           first time a command needs it)
-#   tunnel.sh extract-import
+#   tunnel.sh extract-import [zip]
 #                           Both: extract, then import
 #   tunnel.sh update        Update the daemon from this copy, only if it differs
 #                           (up, down and import do this too)
@@ -28,8 +28,9 @@
 #   tunnel.sh uninstall     Take everything down, remove both (configs are kept)
 #   tunnel.sh rotate-warp   New Cloudflare WARP keys: registers a new account
 #                           (install.sh), imports it, and reconnects a warped
-#                           tunnel that's up. The old account is deleted once
-#                           that works, or put back if registering fails.
+#                           tunnel that's up. The old account's files are
+#                           removed once that works (Cloudflare isn't told),
+#                           or put back if registering fails.
 #   tunnel.sh log           Follow the daemon's log
 #   tunnel.sh breakglass    Lost the network? Stops app tunnels, the daemon,
 #                           wg-quick and wireguard-go; removes every route of ours
@@ -124,15 +125,19 @@ devices() {
     done
 }
 
-# old_layout: stop on ~/wg-tunnels/local and sing-box/<device>, from before
-# every device had its own folder in devices/
+# old_layout: stop on a layout from before ~/wg-tunnels/devices/ (nothing is
+# moved for you). The same function is in singbox.sh, wgwarp-sweep.sh and install.sh.
 old_layout() {
-    local top="$HOME/wg-tunnels"
+    local top="$HOME/wg-tunnels" d
+    for d in carriers config exports warp; do
+        [ -e "$top/$d" ] && die "$top/$d is an old layout: this Mac's folders go in $top/devices/<this Mac's name, e.g. mbp-1>. Move it first:
+  mkdir -p $top/devices/<name> && mv $top/$d $top/devices/<name>/"
+    done
     [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
-    die "${top} has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
-  mkdir -p ${top}/devices
-  mv ${top}/local ${top}/devices/<this Mac's name, e.g. mbp-1>
-  mv ${top}/sing-box/* ${top}/devices/ && rmdir ${top}/sing-box
+    die "$top has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
+  mkdir -p $top/devices
+  mv $top/local $top/devices/<this Mac's name, e.g. mbp-1>
+  mv $top/sing-box/* $top/devices/ && rmdir $top/sing-box
   (and in each device folder: mv profiles sing-box)"
 }
 
@@ -181,6 +186,7 @@ mac_dir() {
         dev=$(cat "$DEFAULT_FILE" 2>/dev/null)
         [ -n "$dev" ] || exit 1
     fi
+    [[ "$dev" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] || die "${DEFAULT_FILE} doesn't hold a device name: tunnel.sh default to pick one"
     [ -d "$TUNNELS/$dev" ] || die "The default device ${dev} has no folder ${TUNNELS}/${dev}: tunnel.sh default to pick another"
     echo "$TUNNELS/$dev"
 }
@@ -192,9 +198,16 @@ put() {
     printf '%s\n' "$2" > "$tmp" && chmod "${3:-644}" "$tmp" && mv -f "$tmp" "$1"
 }
 
-conf_val() {  # conf_val <file> <key> — first value of key
-    awk -F'[[:space:]]*=[[:space:]]*' -v k="$2" \
-        'tolower($1) ~ "^[[:space:]]*" tolower(k) "$" {sub(/[[:space:]]+$/, "", $2); print $2; exit}' "$1"
+# conf_val <file> <key>: the first value of key (any case), everything after
+# the first "=" (so a base64 key keeps its "=" padding)
+conf_val() {
+    awk -v k="$2" '
+        { line = $0; sub(/\r$/, "", line) }
+        tolower(line) ~ "^[[:space:]]*" tolower(k) "[[:space:]]*=" {
+            v = substr(line, index(line, "=") + 1)
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
+            print v; exit
+        }' "$1"
 }
 
 host_of() { sed -E 's/^\[?([^]]*)\]?:[0-9]+$/\1/'; }
@@ -225,8 +238,6 @@ tsv_get() {  # tsv_get <name> — "iface kind endpoint"
 
 # --- import (root) ---
 
-# kind of a config: warped (by name), full (all of IPv4: any x.x.x.x/0 — wg
-# ignores the address bits, e.g. 192.168.1.0/0 — or the two /1 halves), or split
 # A warped carrier as wgwarp-sweep.sh makes it, which import checks but doesn't
 # fix: AllowedIPs has the WARP endpoint and nothing wide (wider than /8, /16
 # for IPv6, would route traffic around WARP), and no DNS. Prints why not.
@@ -242,6 +253,8 @@ swept_ok() {  # swept_ok <conf> <warp-endpoint>
     done
 }
 
+# kind_of <name> <conf>: warped (by name), full (all of IPv4: any x.x.x.x/0 —
+# wg ignores the address bits, e.g. 192.168.1.0/0 — or the two /1 halves), or split
 kind_of() {
     local ips
     case "$1" in "$TUNNEL_PREFIX"*) echo warped; return ;; esac
@@ -844,7 +857,7 @@ cmd_uninstall_root() {
 # --- user side ---
 
 root() {
-    [ -x "$INSTALLED" ] || die "Not installed — run: tunnel.sh install"
+    [ -x "$INSTALLED" ] || die "Not installed — run install.sh (or tunnel.sh install for just the daemon)"
     # Run from the repo and the installed copy is older: update it first (this
     # restarts the daemon, which re-applies what's wanted)
     if [ "$0" != "$INSTALLED" ] && ! cmp -s "$0" "$INSTALLED"; then
@@ -856,11 +869,13 @@ root() {
 
 # Before up: installed, and something imported
 ready() {
+    local dev
+    dev="${TUNNELS}/$(cat "$DEFAULT_FILE" 2>/dev/null | grep . || echo "<this Mac's name>")"
     [ -x "$INSTALLED" ] || die "Not installed. First time:
   install.sh (in this repo)
-  put .conf files in ${TUNNELS}/<this Mac>/config (or WireGuard app → Export Tunnels to Zip… into its exports/, then tunnel.sh extract)
+  put .conf files in ${dev}/config (or WireGuard app → Export Tunnels to Zip… into ${dev}/exports, then tunnel.sh extract)
   tunnel.sh import"
-    [ -s "$TSV" ] || die "No tunnels imported: tunnel.sh import (configs in ${TUNNELS}/<this Mac>/config), or tunnel.sh extract-import (from an export zip)"
+    [ -s "$TSV" ] || die "No tunnels imported: tunnel.sh import (configs in ${dev}/config), or tunnel.sh extract-import (from an export zip)"
 }
 
 check_installed() {
@@ -973,8 +988,10 @@ follow() {
         if [ "$n" -gt "$seen" ]; then
             while IFS= read -r line; do
                 case "$line" in
-                    ok) echo; status; return 0 ;;
-                    fail) echo; status; return 1 ;;
+                    # The full status (it looks up the exit IP, slow while
+                    # the kill switch blocks) only for a person at a terminal
+                    ok) echo; [ -t 1 ] && status; return 0 ;;
+                    fail) echo; [ -t 1 ] && status; return 1 ;;
                     *) echo "  $line" ;;
                 esac
             done < <(sed -n "$((seen + 1)),${n}p" "$RUN/progress")
@@ -1002,7 +1019,7 @@ cmd_up() {
     [ -z "$od" ] || die "On Demand is on in the WireGuard app for: ${od}
 It reconnects behind the tunnel and breaks it. Turn it off (the tunnel → Edit → uncheck On-Demand), then tunnel.sh up."
     check_installed
-    current; echo; echo
+    [ -t 1 ] && { current; echo; echo; }
     if [ -n "$1" ] && ! [[ "$1" =~ ^[0-9]+$ ]]; then
         tunnel="$1"
         [ -n "$(tsv_get "$tunnel")" ] || die "No tunnel '${tunnel}' (tunnel.sh list)"
@@ -1036,9 +1053,10 @@ cmd_rotate_warp() {
     fi
 
     echo "== Import"
-    cmd_import -y || die "rotate-warp: import failed. The new account is in place: run tunnel.sh import, then delete ${old}"
+    # A subshell: import's own errors exit it, not this, so the hint below shows
+    ( cmd_import -y ) || die "rotate-warp: import failed. The new account is in place: run tunnel.sh import, then delete ${old}"
     rm -rf "$old"
-    echo "Old WARP account deleted"
+    echo "Old WARP account's files removed (Cloudflare isn't told)"
 
     # A warped tunnel that's up still runs the old keys: reconnect it
     active=$(awk '$1 == "name" {print $2}' "$RUN/status" 2>/dev/null)
@@ -1094,15 +1112,14 @@ exit_line() {
 
 status() {
     local apps upd age od
-    echo "warped:"; load_tunnels warped; list warped
-    echo; echo "other:"; load_tunnels other; list other
+    list_all
     echo
     [ -s "$DEFAULT_FILE" ] && echo "device: $(cat "$DEFAULT_FILE") (tunnel.sh default)"
     if [ ! -f "$RUN/status" ]; then
-        echo "daemon: not running (tunnel.sh install)"
+        echo "daemon: not running (install.sh, or tunnel.sh install for just the daemon)"
     else
         upd=$(st updated); age=$(( $(date +%s) - ${upd:-0} ))
-        [ "$age" -gt 10 ] && echo "daemon: no update for ${age}s — tunnel.sh log"
+        [ "$age" -gt 15 ] && echo "daemon: no update for ${age}s — tunnel.sh log"
         echo "wanted: $(st desired)"
         echo "kill switch: $(st armed)"
         [ -n "$(st name)" ] && echo "up:     $(st name) — $(st iface | awk '{printf "%s %s, handshake %ss ago", $1, $2, ($3 == "" ? "never " : $3)}')"
@@ -1145,11 +1162,13 @@ cmd_extract() {
     for f in "$CONFIGS"/*.conf; do
         [ -f "$f" ] || continue
         name=$(basename "$f")
-        [ -f "$tmp/$name" ] || echo "  ${name%.conf}: removed (not in the zip)"
+        [ -f "$tmp/$name" ] && continue
+        echo "  ${name%.conf}: removed (not in the zip)"
         rm -f "$f"
     done
     chmod 600 "$tmp"/*.conf
-    mv "$tmp"/*.conf "$CONFIGS"/
+    # Over the old ones: if this fails, the zip's configs are still in $tmp
+    mv -f "$tmp"/*.conf "$CONFIGS"/ || die "Can't move the configs into ${CONFIGS} (they're in ${tmp})"
     rm -rf "$tmp"
 }
 
@@ -1163,6 +1182,7 @@ cmd_import() {
         case "$a" in -y|--yes) yes=1 ;; "") ;; *) src="$a" ;; esac
     done
     [ -n "$src" ] || { src=$(mac_dir) || exit 1; src="$src/config"; }
+    [ -n "$WGT_TEST" ] || [ -x "$INSTALLED" ] || die "Not installed — run install.sh (or tunnel.sh install for just the daemon)"
     check_installed
     [ -d "$src" ] || die "No folder ${src} — tunnel.sh extract (from an export zip), or put .conf files there"
     for f in "$src"/*.conf; do [ -f "$f" ] && n=$((n + 1)); done
@@ -1180,11 +1200,14 @@ cmd_import() {
     if [ -n "$WGT_TEST" ]; then "$0" _import "$src"; else root _import "$src"; fi
 }
 
+usage() { echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import [zip] | default [device] | update | install | uninstall | rotate-warp | log | breakglass"; }
+list_all() { echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other; }
+
 case "${1:-status}" in
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
-    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | default [device] | update | install | uninstall | rotate-warp | log | breakglass" ;;
-    list)      echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other ;;
+    status)    check_installed; status; echo; usage ;;
+    list)      list_all ;;
     extract)   cmd_extract "$2" ;;
     import)    shift; cmd_import "$@" ;;
     extract-import) cmd_extract "$2" && cmd_import ;;
@@ -1192,7 +1215,7 @@ case "${1:-status}" in
     default)   cmd_default "$2" ;;
     update)    cmd_update ;;
     install)   sudo "$0" _install "$0" ;;
-    uninstall) [ -x "$INSTALLED" ] && sudo "$INSTALLED" _uninstall ;;
+    uninstall) [ -x "$INSTALLED" ] || die "Not installed"; sudo "$INSTALLED" _uninstall ;;
     log)       tail -f "$LOG" ;;
     breakglass) cmd_breakglass ;;
     daemon)    cmd_daemon ;;
@@ -1201,5 +1224,5 @@ case "${1:-status}" in
     _install)  cmd_install_root "$2" ;;
     _uninstall) cmd_uninstall_root ;;
     _breakglass) cmd_breakglass_root ;;
-    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | default [device] | update | install | uninstall | rotate-warp | log | breakglass" >&2; exit 1 ;;
+    *) usage >&2; exit 1 ;;
 esac

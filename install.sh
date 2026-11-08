@@ -40,7 +40,8 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --swiftbar)  swiftbar=1 ;;
         --no-daemon) daemon=0 ;;
-        --device)    device="${2:-}"; shift ;;
+        --device)    [ -n "${2:-}" ] || { echo "--device needs a name (see --help)" >&2; exit 1; }
+                     device="$2"; shift ;;
         --device=*)  device="${1#--device=}" ;;
         -h|--help)   sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
@@ -53,6 +54,7 @@ ok() { printf '  ok       %s\n' "$*"; }
 changed() { printf '  changed  %s\n' "$*"; }
 
 [ "$(uname -s)" = Darwin ] || die "macOS only"
+[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
 [ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
 
 echo "== Homebrew"
@@ -78,31 +80,41 @@ for pkg in wireguard-tools wgcf; do
 done
 
 echo "== ~/wg-tunnels"
-# Earlier layouts: carriers/ config/ exports/ warp/ straight in ~/wg-tunnels,
-# or local/ and sing-box/<device>/. Carrying on would register a second WARP
-# account and strand those configs.
-for d in carriers config exports warp; do
-    [ -e "$TUNNELS_DIR/$d" ] && die "$TUNNELS_DIR/$d is an old layout: this Mac's folders go in $DEVICES/<this Mac's name, e.g. mbp-1>. Move it first:
-    mkdir -p $DEVICES/<name> && mv $TUNNELS_DIR/$d $DEVICES/<name>/"
-done
-if [ -d "$TUNNELS_DIR/local" ] || [ -d "$TUNNELS_DIR/sing-box" ]; then
-    die "$TUNNELS_DIR has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
-  mkdir -p $DEVICES
-  mv $TUNNELS_DIR/local $DEVICES/<this Mac's name, e.g. mbp-1>
-  mv $TUNNELS_DIR/sing-box/* $DEVICES/ && rmdir $TUNNELS_DIR/sing-box
+# Earlier layouts would strand those configs and register a second WARP
+# account. old_layout: stop on a layout from before ~/wg-tunnels/devices/
+# (nothing is moved for you). The same function is in tunnel.sh, singbox.sh
+# and wgwarp-sweep.sh.
+old_layout() {
+    local top="$HOME/wg-tunnels" d
+    for d in carriers config exports warp; do
+        [ -e "$top/$d" ] && die "$top/$d is an old layout: this Mac's folders go in $top/devices/<this Mac's name, e.g. mbp-1>. Move it first:
+  mkdir -p $top/devices/<name> && mv $top/$d $top/devices/<name>/"
+    done
+    [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
+    die "$top has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
+  mkdir -p $top/devices
+  mv $top/local $top/devices/<this Mac's name, e.g. mbp-1>
+  mv $top/sing-box/* $top/devices/ && rmdir $top/sing-box
   (and in each device folder: mv profiles sing-box)"
-fi
+}
+old_layout
 
-# This Mac's device: --device, else ~/wg-tunnels/.default, else ask
+# This Mac's device: --device, else ~/wg-tunnels/devices/.default, else ask
 valid_name() { [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]]; }
+existing=$(cd "$DEVICES" 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | paste -sd' ' -)
 [ -n "$device" ] || device=$(cat "$DEFAULT_FILE" 2>/dev/null)
 if [ -z "$device" ]; then
     [ -t 0 ] || die "This Mac's device name, please: ./install.sh --device <name> (e.g. mbp-1, the name its wg-tools configs end in)"
-    existing=$(cd "$DEVICES" 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | paste -sd' ' -)
     [ -n "$existing" ] && echo "  device folders: $existing"
     read -rp "  This Mac's device name (a folder in ~/wg-tunnels/devices; e.g. mbp-1, the name its wg-tools configs end in): " device
 fi
 valid_name "$device" || die "Device names are letters, digits, . _ - (not starting with .): $device"
+# A new folder means a new WARP account and warp.conf: a typo for an existing
+# device shouldn't do that quietly
+if [ ! -d "$DEVICES/$device" ] && [ -n "$existing" ] && [ -t 0 ]; then
+    read -rp "  $device is a new device folder (with a new WARP account), next to: $existing. Create it? [y/N] " answer
+    [[ "$answer" =~ ^[Yy] ]] || die "Nothing changed"
+fi
 DEV_DIR="$DEVICES/$device"
 WARP_DIR="$DEV_DIR/warp"
 

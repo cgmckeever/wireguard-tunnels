@@ -65,7 +65,10 @@ if [ "$1" = run ]; then
     elif [ "$rc" -eq 0 ]; then
         notify "VPN" "${what}: done"
     else
-        notify "VPN" "${what}: failed — $(grep -E 'fail:|failed|rotate-warp:|refuses|On Demand|No |Not |sorry|incorrect' <<< "$out" | tail -1 | sed 's/^ *//')"
+        # The line that says why, or else the last thing it printed
+        why=$(grep -E 'fail:|failed|rotate-warp:|update:|refuses|On Demand|No |Not |sorry|incorrect|password' <<< "$out" | tail -1 | sed 's/^ *//')
+        [ -n "$why" ] || why=$(grep . <<< "$out" | tail -1 | sed 's/^ *//')
+        notify "VPN" "${what}: failed — ${why}"
     fi
     exit 0
 fi
@@ -267,7 +270,7 @@ echo "--Status in Terminal | bash=$TUNNEL param1=status terminal=true"
 echo "--Log | bash=$TUNNEL param1=log terminal=true"
 echo "--Rotate WARP Keys | bash=$SELF param1=run param2=rotate-warp terminal=false refresh=true"
 # The daemon is a copy of the repo's tunnel.sh: flag it when a git pull changed that
-if cmp -s "$TUNNEL" /usr/local/sbin/wg-tunnels; then
+if [ ! -x /usr/local/sbin/wg-tunnels ] || cmp -s "$TUNNEL" /usr/local/sbin/wg-tunnels; then
     echo "--Update Daemon | bash=$SELF param1=run param2=update terminal=false refresh=true"
 else
     echo "--Update Daemon (out of date) | bash=$SELF param1=run param2=update terminal=false refresh=true"
