@@ -94,11 +94,10 @@ On your Mac (macOS and [Homebrew](https://brew.sh) needed):
    2) Only Sing-Box Device Tunnels (phones, Apple TV: no daemon, no sudo)
    Choice [1]:
    ```
-   Pick **1** if you want **this Mac's** traffic tunneled (add `--swiftbar`
-   for the menu bar lock). Pick **2** if you only want tunnels on **phones,
-   tablets or an Apple TV**: the Mac's own connection is left alone, and you
-   can run the full install later. (`./install.sh --sing-box` picks 2 without
-   asking.)
+   Pick **1** if you want **this Mac's** traffic tunneled; it then offers the
+   [menu bar lock](#menu-bar-optional). Pick **2** if you only want tunnels
+   on **phones, tablets or an Apple TV**: the Mac's own connection is left
+   alone, and you can run the full install later.
 
    Both make your folders ([Your folders](#your-folders)): 1 asks for this
    Mac's device name (`mbp-1`, say), 2 for a first device (`iphone`, say).
@@ -118,9 +117,10 @@ From here on this README writes just `tunnel.sh` and `singbox.sh`.
 
 Safe to re-run, e.g. after a `git pull`: each step checks first, changes only
 what's missing or out of date, and prints `ok` or `changed`.
-The 1-or-2 question comes only on a Mac without Local Mac Tunnels yet, in a
-terminal, with no options; otherwise it's the full install unless
-`--sing-box` is given.
+The questions (1 or 2, then the menu bar lock) come only on a Mac without
+Local Mac Tunnels yet, in a terminal, with no options. Otherwise the options
+decide: the full install, `--swiftbar` for the menu bar lock, `--sing-box`
+for 2.
 
 | Step | `install.sh` | `--sing-box` |
 |------|--------------|--------------|
@@ -132,7 +132,7 @@ terminal, with no options; otherwise it's the full install unless
 | Option | What |
 |--------|------|
 | `--device <name>` | The device name, without asking: this Mac's, or with `--sing-box` the first device's. Needed the first time when there's no terminal (e.g. Ansible) |
-| `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar, the plugin, and a LaunchAgent that keeps SwiftBar running |
+| `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar, the plugin, and a LaunchAgent that keeps SwiftBar running. Re-run with it to add the lock later |
 | `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt. Then run `tunnel.sh install`, or as root (e.g. Ansible `become`): `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
 | `--sing-box` | Only what Sing-Box Device Tunnels need (above). Takes only `--device` |
 
@@ -317,7 +317,8 @@ The kill switch blocks all traffic outside the tunnel until you run
 
 ### Menu bar (optional)
 
-`install.sh --swiftbar` adds a lock icon to the menu bar, through
+The full install offers it (or `install.sh --swiftbar` adds it later): a
+lock icon in the menu bar, through
 [SwiftBar](https://github.com/swiftbar/SwiftBar), showing whether you're
 protected:
 

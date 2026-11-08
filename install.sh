@@ -9,7 +9,8 @@
 #
 #   With no options, in a terminal, on a Mac without Local Mac Tunnels yet, it
 #   asks which: 1) Full Local Mac Tunnels (the default), 2) Only Sing-Box Device
-#   Tunnels. Any option, or no terminal, skips the question.
+#   Tunnels; after 1, whether to add the menu bar lock (--swiftbar). Any
+#   option, or no terminal, skips the questions.
 #
 #   (default)     Local Mac Tunnels, and what Sing-Box Device Tunnels need too.
 #                 Homebrew packages wireguard-tools, wgcf and jq; this Mac's device
@@ -75,7 +76,8 @@ if [ "$opts" = 0 ] && [ -t 0 ] && [ ! -f "$DEFAULT_FILE" ]; then
     echo "  2) Only Sing-Box Device Tunnels (phones, Apple TV: no daemon, no sudo)"
     read -rp "Choice [1]: " answer
     case "${answer:-1}" in
-        1) ;;
+        1) read -rp "Menu bar lock (SwiftBar: shows whether you're protected, switches tunnels)? [Y/n] " answer
+           [[ "$answer" =~ ^[Nn] ]] || swiftbar=1 ;;
         2) singbox_only=1 ;;
         *) die "1 or 2, please" ;;
     esac
