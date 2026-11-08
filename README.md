@@ -60,7 +60,7 @@ devices. Use either, or both:
 | Runs the tunnels | A root daemon on the Mac (`wg-quick` under launchd) | The [sing-box](https://sing-box.sagernet.org) app on the device |
 | You use | `tunnel.sh`, and an optional menu bar lock | `singbox.sh` on the Mac to build profiles, then the app |
 | Kill switch | Yes: nothing leaves outside a tunnel, even if it fails | Only while the app runs |
-| Install | `install.sh` | `install.sh --sing-box` |
+| Install | `install.sh`, choice 1 | `install.sh`, choice 2 |
 
 **Local Mac Tunnels.** The WireGuard app's tunnels on a Mac belong to one macOS
 user and stop passing traffic after a user switch. Here a root daemon runs
