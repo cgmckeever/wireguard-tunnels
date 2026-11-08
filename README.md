@@ -195,8 +195,10 @@ section ([Local Mac Tunnels](#warped-tunnels-on-this-mac),
 
 **Edit the carrier, not the warped file.** Every sweep writes the warped file
 again from its carrier (only when it changes). `x.conf`, `warped.x.conf` and
-`warped-x.conf` in `carriers/` all become `warped.x`; only the first is used
-and the rest are reported. Other files in `config/` are left alone: a
+`warped-x.conf` in `carriers/` all become `warped.x`, so keep only one: if
+there are several, one is used and the rest are reported as skipped. A carrier
+that isn't a one-peer WireGuard config is skipped too. Other files in
+`config/` are left alone: a
 `warped.*` file whose carrier is gone is reported as an *orphan* (delete it
 yourself), anything else (a plain tunnel) as *manual*.
 
@@ -233,13 +235,12 @@ back to TCP; pages still load.
 ### WARP endpoint
 
 WARP connects to `162.159.192.1:2408` unless `WARP_ENDPOINT` (IPv4
-`address:port`) says otherwise. `install.sh`, the sweep and `singbox.sh` read it; the sweep writes it
-into each warped tunnel, so all of a device's tunnels and its WARP side must
-agree. To change it, export it in your shell profile, then re-run
-`install.sh` and update every device's tunnels as its setup does:
-[import](#tunnelsh) on this Mac, [build](#singboxsh) for each sing-box device.
-On this Mac, warped tunnels whose endpoint doesn't match the WARP config are
-skipped until you do.
+`address:port`) says otherwise. The sweep writes it into each warped tunnel,
+so a device's warped tunnels and its WARP side must agree. To change it,
+export it in your shell profile, then redo each setup: on this Mac, re-run
+`install.sh` (it rewrites the WARP config) and [import](#tunnelsh); for each
+sing-box device, [build](#singboxsh). Until then, this Mac skips warped
+tunnels whose endpoint doesn't match its WARP config.
 
 ## Local Mac Tunnels
 
@@ -277,7 +278,7 @@ Lost the network, or also using the WireGuard app? See
 | `down` | Everything down, back to the normal connection |
 | `status` (default) | Tunnels, what's up, handshakes, the kill switch, the exit IP |
 | `list` | Number the warped and other tunnels |
-| `import [dir] [-y]` | Turn `<mac>/carriers/` into [warped tunnels](#warped-tunnels) in `config/`, then install every `.conf` in `<mac>/config/` (or just those in `dir`) for the daemon, and sort each into its [kind](#tunnel-kinds). Tunnels no longer there are removed, unless up right now. Shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y`, or no terminal (the menu bar), skips the question |
+| `import [dir] [-y]` | Turn `<mac>/carriers/` into [warped tunnels](#warped-tunnels) in `config/`, then install every `.conf` in `<mac>/config/` for the daemon, and sort each into its [kind](#tunnel-kinds). Given a `dir`, installs the `.conf` files there instead, with no sweep. Tunnels no longer there are removed, unless up right now. Shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y`, or no terminal, skips the question |
 | `extract [zip]` | For tunnels kept in the WireGuard app: replace `<mac>/config/` with the `.conf` files in the newest zip from its *Export Tunnels to Zip…* in `<mac>/exports/` (or the one given). Configs not in the zip are removed (warped ones come back from `carriers/` on the next `import`). The zip is kept |
 | `extract-import [zip]` | `extract`, then `import` |
 | `default [device]` | Show or change this Mac's device, saved in `~/wg-tunnels/devices/.default`. `extract`, `import` and `rotate-warp` use it. Changing it doesn't touch the daemon; run `import` after |
@@ -374,7 +375,7 @@ Start here when a tunnel or the network misbehaves.
   broken.
 - **A warped tunnel connects but nothing loads?** See
   [Small carrier MTU](#small-carrier-mtu). If `import` skipped it, see
-  [Warped tunnels](#warped-tunnels) ("When a warped tunnel is skipped").
+  [Warped tunnels on this Mac](#warped-tunnels-on-this-mac).
 - **Also using the WireGuard app?** That's fine, with two rules. Turn off On
   Demand for its tunnels: it reconnects behind `up` and breaks the tunnel, so
   `up` refuses while it's on. And switch an app tunnel on only after `down`,
@@ -447,7 +448,7 @@ rm -f "$(defaults read com.ameba.SwiftBar PluginDirectory)/tunnel-status.5s.sh"
 brew uninstall --cask swiftbar                            # if nothing else uses it
 ```
 
-And the packages, if nothing else uses them: `brew uninstall wgcf wireguard-tools`.
+And the packages, if nothing else uses them: `brew uninstall wgcf wireguard-tools jq`.
 
 ## Sing-Box Device Tunnels
 
@@ -463,7 +464,7 @@ sing-box.
 
 ### sing-box quick start
 
-After `./install.sh --sing-box`, with `iphone` the device it asked for (no
+After `./install.sh` (choice 2), with `iphone` the device it asked for (no
 device yet, or another one? `singbox.sh new <device>` first):
 
 1. **Add its configs** to `~/wg-tunnels/devices/iphone/`: carriers in
@@ -497,14 +498,14 @@ case), the server it goes to: `<server>.all.<device>.json`.
 | `warped.all.iphone.json` | Every `warped.*` tunnel, whatever carries it, and `warp` |
 
 A group is only written when it has two or more tunnels, even if it ends up
-holding the same tunnels as the composite. So name every config, carriers
-included, `<server>.<name>.conf`: `proton.chicago.conf`, not `chicago.conf`
-(wireguard-tools' names already are). A carrier's warped tunnel is
-`warped.<carrier>`, so `carriers/proton.chicago.conf` gives
-`warped.proton.chicago`.
+holding the same tunnels as the composite. So name every config
+`<server>.<name>.conf`: `proton.chicago.conf`, not `chicago.conf`
+(wireguard-tools' names already are). Carriers follow the same rule for
+readable names, though their warped tunnels all group under `warped`:
+`carriers/proton.chicago.conf` gives `warped.proton.chicago`.
 
-Every device also gets a `warp` tunnel, in the composite, in
-`warped.all.<device>.json` and as `warp.json`:
+Every device also gets a `warp` tunnel, as `warp.json`, in the composite, and
+in `warped.all.<device>.json` when it has a warped tunnel to join:
 WARP alone, straight from the device's network, with no carrier. It uses the
 device's own WARP account, so it needs no config of its own. Traffic exits
 through Cloudflare, but the network you're on can see you're using WARP; a
