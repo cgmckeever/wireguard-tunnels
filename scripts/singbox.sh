@@ -19,12 +19,13 @@
 #               sweep), and plain configs you put there, used as they are
 #   sing-box/   what build writes, to import in the device's sing-box app:
 #                 composite.<device>.json   every tunnel, picked in the app
-#                 <server>.all.<device>.json  one server's tunnels (dengar.*)
-#                 local.all.<device>.json   the local ones: warped.*, local.*
-#                                           and warp (groups of 2+ only)
+#                 <server>.all.<device>.json  one server's tunnels, from the
+#                                           first word of their names (dengar.*,
+#                                           proton.*; warped.* and warp go in
+#                                           warped.all; groups of 2+ only)
 #                 <tunnel>.json             one tunnel each
 #                 warp.json                 WARP alone, no carrier (in the
-#                                           composite and local.all too)
+#                                           composite and warped.all too)
 #               build owns this folder: a .json it didn't write is removed
 #
 # This Mac is a device too (its folder is the one in devices/.default,
@@ -358,12 +359,12 @@ commit_profiles() {
 }
 
 # group_key <tag>: the group profile a tunnel also goes in, from the first
-# word of its name: warped.*, local.* and warp (WARP alone) are the device's
-# local tunnels; anything else, e.g. dengar.chicago.iphone, its server's
+# word of its name, e.g. dengar.chicago.iphone in dengar's; warp (WARP alone)
+# goes with the warped tunnels
 group_key() {
     local k
     k=$(printf '%s' "${1%%.*}" | tr '[:upper:]' '[:lower:]')
-    case "$k" in warp|warped) k=local ;; esac
+    [ "$k" = warp ] && k=warped
     echo "$k"
 }
 
@@ -455,8 +456,8 @@ cmd_build() {
     out="composite.$name.json"
     stage_group "$dir/sing-box/$out" "${!tags[@]}"
     written+="$out "
-    # Groups: <server>.all.<device> for a server's tunnels, local.all.<device>
-    # for the local ones (warped, local.*, warp). Only with two or more.
+    # Groups: <server>.all.<device> for each first word of the tunnels' names
+    # (warp counts as warped). Only with two or more.
     for i in "${!tags[@]}"; do
         k=$(group_key "${tags[i]}")
         case "$keys" in *" $k "*) ;; *) keys+="$k " ;; esac
@@ -489,7 +490,7 @@ cmd_build() {
     fi
     echo "Next: AirDrop the profiles you want to the device and import each in sing-box"
     echo "      (Profiles > New Profile > Import). The composite (every tunnel) and the"
-    echo "      .all. groups (one server's, or the local ones) switch tunnels in the app's"
+    echo "      .all. groups (one server's, or the warped ones) switch tunnels in the app's"
     echo "      picker without dropping the VPN; a one-tunnel profile switches by switching"
     echo "      profiles. They hold private keys: delete the copies you send."
 }

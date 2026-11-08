@@ -187,8 +187,8 @@ tunnels; this step is called the *sweep*. How each setup runs it is in its own
 section ([Local Mac Tunnels](#warped-tunnels-on-this-mac),
 [Sing-Box Device Tunnels](#what-build-accepts-and-writes)).
 
-**What the sweep writes.** `carriers/chicago.conf` becomes
-`config/warped.chicago.conf`, with `AllowedIPs` set to the WARP endpoint
+**What the sweep writes.** `carriers/proton.chicago.conf` becomes
+`config/warped.proton.chicago.conf`, with `AllowedIPs` set to the WARP endpoint
 (plus [extras](#extras)), the `DNS` line removed, and
 `PersistentKeepalive = 25`, so the carrier carries WARP and nothing else. The
 `warped.` prefix is what marks a tunnel as warped.
@@ -485,23 +485,26 @@ device yet, or another one? `singbox.sh new <device>` first):
 |---------|--------------|-------------------|
 | `composite.<device>.json` | Every tunnel (warped ones first, `warp` last) | In the app's picker, without dropping the VPN |
 | `<group>.all.<device>.json` | One group of tunnels (below) | In the picker, as in the composite |
-| `<tunnel>.json` (e.g. `warped.chicago.json`, `dengar.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
+| `<tunnel>.json` (e.g. `warped.proton.chicago.json`, `dengar.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
 
-The groups come from the first word of each tunnel's name (in any case):
+A group is every tunnel whose name starts with the same first word (in any
+case), the server it goes to: `<server>.all.<device>.json`.
 
-| Group profile | Tunnels in it | e.g. |
-|---------------|---------------|------|
-| `local.all.<device>.json` | The local ones: every `warped.*` tunnel (whatever carries it), every `local.*` tunnel (a provider config used directly), and `warp` | `warped.chicago`, `local.chicago`, `warp` |
-| `<server>.all.<device>.json` | Every tunnel whose name starts with that server | `dengar.all.iphone.json`: `dengar.chicago.iphone`, `dengar.warped.chicago.iphone` |
+| Group profile | Tunnels in it |
+|---------------|---------------|
+| `dengar.all.iphone.json` | `dengar.chicago.iphone`, `dengar.warped.chicago.iphone` |
+| `proton.all.iphone.json` | `proton.chicago`, `proton.toronto` (provider configs used directly) |
+| `warped.all.iphone.json` | Every `warped.*` tunnel, whatever carries it, and `warp` |
 
 A group is only written when it has two or more tunnels, even if it ends up
-holding the same tunnels as the composite. Name plain configs to match:
-`local.<name>.conf` for a provider config used directly,
-`<server>.<name>.conf` for one of your servers (wireguard-tools' names
-already are).
+holding the same tunnels as the composite. So name every config, carriers
+included, `<server>.<name>.conf`: `proton.chicago.conf`, not `chicago.conf`
+(wireguard-tools' names already are). A carrier's warped tunnel is
+`warped.<carrier>`, so `carriers/proton.chicago.conf` gives
+`warped.proton.chicago`.
 
 Every device also gets a `warp` tunnel, in the composite, in
-`local.all.<device>.json` and as `warp.json`:
+`warped.all.<device>.json` and as `warp.json`:
 WARP alone, straight from the device's network, with no carrier. It uses the
 device's own WARP account, so it needs no config of its own. Traffic exits
 through Cloudflare, but the network you're on can see you're using WARP; a
