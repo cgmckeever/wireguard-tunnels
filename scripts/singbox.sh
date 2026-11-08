@@ -9,6 +9,8 @@
 # Usage:
 #   singbox.sh new <device>      make ~/wg-tunnels/sing-box/<device>/ and its own WARP account
 #   singbox.sh build <device>    sweep its carriers, write its profiles/
+#   singbox.sh build local       this Mac's tunnels (~/wg-tunnels/local) as
+#                                profiles for the sing-box app on the Mac
 #   singbox.sh list              the devices and what each has
 #
 # ~/wg-tunnels/sing-box/<device>/   (0700: it all holds private keys)
@@ -21,12 +23,17 @@
 #                 composite.<device>.json   every tunnel, picked in the app
 #                 <tunnel>.json             one tunnel each
 #
+# build local reads this Mac's folders (set up by install.sh) and writes
+# ~/wg-tunnels/local/profiles/. The Mac's keys are the daemon's: run one or
+# the other, never both (tunnel.sh down before turning sing-box on).
+#
 # Override with TUNNELS_DIR (default ~/wg-tunnels) and WARP_ENDPOINT
 # (default 162.159.192.1:2408).
 
 set -o pipefail
 TUNNELS_DIR="${TUNNELS_DIR:-$HOME/wg-tunnels}"
 SINGBOX_DIR="$TUNNELS_DIR/sing-box"
+LOCAL_DIR="$TUNNELS_DIR/local"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 umask 077
@@ -46,6 +53,12 @@ device_dir() {
     echo "$SINGBOX_DIR/$1"
 }
 
+# build_dir <name>: where build works: this Mac's folder for "local", else
+# the device's
+build_dir() {
+    if [ "$1" = local ]; then echo "$LOCAL_DIR"; else device_dir "$1" build; fi
+}
+
 # quiet_wgcf <dir> <args>: its chatter (a device table) only shows if it fails
 quiet_wgcf() {
     local dir="$1" output
@@ -55,6 +68,7 @@ quiet_wgcf() {
 
 cmd_new() {
     local dir d
+    [ "$1" != local ] || die "local is this Mac (install.sh sets it up); pick another device name"
     dir=$(device_dir "$1" new) || exit 1
     for d in "$TUNNELS_DIR" "$SINGBOX_DIR" "$dir" "$dir/carriers" "$dir/warp" "$dir/config"; do
         mkdir -p "$d" && chmod 700 "$d" || die "can't create $d"
@@ -204,25 +218,33 @@ key_lines() {
     done
 }
 
-# check_keys <device dir> <file>...: no private key twice on this device, or
-# shared with this Mac or another device (two ends on one key knock each other
-# off). Names the files, never the key.
+# check_keys <dir> <file>...: no private key shared with this Mac or another
+# device, or twice on one device (two ends on one key knock each other off).
+# Names the files, never the key.
+#
+# build local is this Mac, where keys are shared on purpose: its profiles and
+# the daemon run one at a time, and a carrier may be a copy of a config in
+# config/ (the daemon runs one tunnel at a time too). Those only get a note.
 check_keys() {
-    local dir="$1" d others=() dup
+    local dir="$1" d others=() dup self
     shift
     shopt -s nullglob
-    others=("$TUNNELS_DIR"/local/carriers/*.conf "$TUNNELS_DIR"/local/config/*.conf
-            "$TUNNELS_DIR"/local/warp/wgcf-profile.conf)
+    [ "$dir" = "$LOCAL_DIR" ] || others=("$LOCAL_DIR"/carriers/*.conf "$LOCAL_DIR"/config/*.conf
+                                         "$LOCAL_DIR"/warp/wgcf-profile.conf)
     for d in "$SINGBOX_DIR"/*/; do
         [ "${d%/}" = "$dir" ] && continue
         others+=("$d"config/*.conf "$d"warp/wgcf-profile.conf)
     done
     dup=$( { key_lines "$@" | awk '{ print "M\t" $0 }'; key_lines "${others[@]}" | awk '{ print "O\t" $0 }'; } \
-        | awk -F'\t' '$1 == "M" { if ($2 in mine) print "  " mine[$2] " and " $3; else mine[$2] = $3; next }
-                      ($2 in mine)  { print "  " mine[$2] " and " $3 }')
+        | awk -F'\t' '$1 == "M" { if ($2 in mine) print "S  " mine[$2] " and " $3; else mine[$2] = $3; next }
+                      ($2 in mine)  { print "O  " mine[$2] " and " $3 }')
+    self=$(sed -n 's/^S//p' <<< "$dup")
+    [ "$dir" = "$LOCAL_DIR" ] && dup=$(grep '^O' <<< "$dup")
     [ -z "$dup" ] || die "same private key in:
-$dup
+$(cut -c2- <<< "$dup")
 each config needs its own (make a new one for this device)"
+    [ -z "$self" ] || echo "note: same private key in (fine on this Mac: one tunnel at a time):
+$self" >&2
 }
 
 # check_tags <device>: endpoint names are unique ("tunnel" is the picker's), and
@@ -295,18 +317,25 @@ commit_profiles() {
 }
 
 cmd_build() {
-    local name="$1" dir profile conf tag why cmtu i min out eps files=() written=" "
+    local name="$1" dir profile conf tag why cmtu i min out eps setup files=() written=" "
     local tags=() unit_eps=() unit_rules=() unit_mtu=() comp_rules=() used=()
     local carrier_names=" " cidrs_seen=" "
-    dir=$(device_dir "$name" build) || exit 1
-    [ -d "$dir" ] || die "no device $name ($HERE/singbox.sh new $name)"
+    dir=$(build_dir "$name") || exit 1
+    setup="$HERE/singbox.sh new $name"; [ "$name" = local ] && setup="install.sh"
+    [ -d "$dir" ] || die "no $dir ($setup)"
     command -v jq >/dev/null || die "jq missing (brew install jq)"
     profile="$dir/warp/wgcf-profile.conf"
-    [ -f "$profile" ] || die "no WARP profile in $dir/warp ($HERE/singbox.sh new $name)"
+    [ -f "$profile" ] || die "no WARP profile in $dir/warp ($setup)"
     why=$(unusable "$profile"); [ -z "$why" ] || die "WARP profile $profile: $why"
 
     echo "== Sweep $dir/carriers"
-    WARP_ENDPOINT="$WARP_ENDPOINT" "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"
+    # This Mac's own folder gets the sweep as you'd run it (with the WireGuard
+    # app column); the config/ it writes is the same either way
+    if [ "$dir" = "$HOME/wg-tunnels/local" ]; then
+        WARP_ENDPOINT="$WARP_ENDPOINT" "$HERE/wgwarp-sweep.sh" || die "sweep failed"
+    else
+        WARP_ENDPOINT="$WARP_ENDPOINT" "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"
+    fi
     echo
 
     shopt -s nullglob
@@ -366,6 +395,13 @@ cmd_build() {
     command -v sing-box >/dev/null || echo "(not checked: sing-box isn't installed on this Mac)"
 
     echo
+    if [ "$name" = local ]; then
+        echo "Next: import the profiles you want in the sing-box app on this Mac"
+        echo "      (Profiles > New Profile > Import). They use the daemon's keys: run"
+        echo "      tunnel.sh down before turning sing-box on, and turn sing-box off"
+        echo "      before tunnel.sh up. sing-box has no kill switch once it stops."
+        return
+    fi
     echo "Next: AirDrop the profiles you want to the device and import each in sing-box"
     echo "      (Profiles > New Profile > Import). The composite switches tunnels in the"
     echo "      app's picker without dropping the VPN; a one-tunnel profile switches by"
@@ -377,6 +413,7 @@ cmd_list() {
     count() { echo $#; }
     shopt -s nullglob
     set -- "$SINGBOX_DIR"/*/
+    [ -d "$LOCAL_DIR/profiles" ] && set -- "$LOCAL_DIR/" "$@"
     [ $# -gt 0 ] || { echo "no sing-box devices yet ($HERE/singbox.sh new <device>)"; return; }
     printf '%-16s %-9s %-8s %-5s %s\n' DEVICE CARRIERS TUNNELS WARP PROFILES
     for dir; do

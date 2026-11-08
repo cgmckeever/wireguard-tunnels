@@ -142,6 +142,7 @@ get their own folders next to it, in `~/wg-tunnels/sing-box/<device>/`
 | `carriers/` | WireGuard configs to wrap WARP inside, as downloaded from your provider or server. `wgwarp-sweep.sh` turns each into `config/warped.<name>.conf`. Only needed for warped tunnels |
 | `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*. `tunnel.sh extract` replaces `config/` with the newest one. Only needed if you use the app; zips are kept |
 | `warp/` | Your Cloudflare WARP account (`wgcf-account.toml`) and profile (`wgcf-profile.conf`), made by `install.sh`. One per Mac; `warp.conf` is built from it |
+| `profiles/` | Only if you run `singbox.sh build local`: these tunnels as sing-box profiles for the Mac ([sing-box on this Mac](#sing-box-on-this-mac)) |
 
 ## Quick start
 
@@ -222,6 +223,7 @@ sweeps a [sing-box device](#sing-box-devices). It reads `WARP_ENDPOINT`, as
 |---------|------|
 | `new <device>` | Make `~/wg-tunnels/sing-box/<device>/` and register the device's own WARP account (needs `wgcf`) |
 | `build <device>` | Sweep its carriers, then write its profiles (needs `jq`) |
+| `build local` | This Mac's tunnels as sing-box profiles, in `~/wg-tunnels/local/profiles/` ([sing-box on this Mac](#sing-box-on-this-mac)) |
 | `list` | The devices, with how many carriers, tunnels and profiles each has |
 
 It reads `WARP_ENDPOINT`, as [install.sh](#install) does, and `TUNNELS_DIR`
@@ -328,8 +330,9 @@ other config, by this Mac, or by another device. Two configs on one key knock
 each other off whenever both are up, and a lost device can be revoked on its
 own. Get one by downloading a new config from your provider or server for
 this device. `build` stops on a key that's used twice, and names the files
-(never the key). The device's warped tunnels all share its one WARP key, which
-is why `new` gives each device its own WARP account.
+(never the key); `build local` is the exception ([sing-box on this
+Mac](#sing-box-on-this-mac)). The device's warped tunnels all share its one
+WARP key, which is why `new` gives each device its own WARP account.
 
 ### Which profile to import
 
@@ -402,6 +405,33 @@ A carrier taken out of `carriers/` leaves the profiles, but its
   `build` warns (it only spots identical entries, not overlapping ones).
 - When `sing-box` is installed on the Mac, `build` checks every profile with
   `sing-box check` before replacing any: if one fails, none change.
+
+### sing-box on this Mac
+
+sing-box has a Mac app too, and it can run this Mac's tunnels instead of the
+daemon:
+
+```sh
+~/Documents/code/wireguard-tunnels/scripts/singbox.sh build local
+```
+
+It runs the Mac's sweep (`wgwarp-sweep.sh`, as you'd run it yourself), then
+builds every tunnel in `~/wg-tunnels/local/config/` into
+`~/wg-tunnels/local/profiles/`: `composite.local.json` and one profile per
+tunnel, as for a device. Import them in the sing-box app on the Mac.
+
+The profiles use the same keys as the daemon, so run one or the other:
+`tunnel.sh down` before turning sing-box on, and turn sing-box off before
+`tunnel.sh up`. For the same reason, a key used twice in `local/` (a carrier
+that's a copy of a config in `config/`, say) only gets a note: on one Mac only
+one of them runs at a time. A key shared with a sing-box device still stops
+the build.
+
+What you give up while sing-box runs instead of the daemon:
+
+- **The kill switch.** `strict_route` keeps traffic in the VPN while sing-box
+  runs; if the app quits, traffic goes out directly.
+- **The menu bar lock** and the `tunnel.sh` commands: they only see the daemon.
 
 ## Menu bar (optional)
 
