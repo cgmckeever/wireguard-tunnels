@@ -460,8 +460,9 @@ What you give up while sing-box runs instead of the daemon:
 
 The menu shows the tunnel, the exit and real IPs with their city, handshakes
 and Tx/Rx, and has Status, Reconnect, Disconnect, Breakglass and every
-imported tunnel to switch to; More has the status in Terminal, the log and
-Rotate WARP Keys. These run in the background and ask for your
+imported tunnel to switch to; More has the status in Terminal, the log,
+Rotate WARP Keys and Update Daemon (`tunnel.sh update`; it says "out of date"
+when the repo's `tunnel.sh` differs from the daemon's copy). These run in the background and ask for your
 password in a dialog (`askpass.sh`). The exit and real IPs come from
 [ipinfo.io](https://ipinfo.io).
 
