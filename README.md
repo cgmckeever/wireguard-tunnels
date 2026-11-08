@@ -185,32 +185,43 @@ time.
 
 ## Warped tunnels
 
-Both setups make warped tunnels the same way: put the carrier's config in the
-device's `carriers/`, and `tunnel.sh import` (Local Mac Tunnels) or
-`singbox.sh build` (Sing-Box Device Tunnels) turns it into a warped tunnel in
-`config/` first. That step is `scripts/wgwarp-sweep.sh` (the *sweep*); you
-can also run it on its own (`wgwarp-sweep.sh` for this Mac,
-`wgwarp-sweep.sh iphone` for a device).
+Both setups turn carriers into warped tunnels the same way, and neither needs
+an extra step: put the carrier's config in the device's `carriers/`, and the
+setup's usual command sweeps it into `config/` before doing anything else.
+
+| | Local Mac Tunnels | Sing-Box Device Tunnels |
+|---|---|---|
+| Put carriers in | `~/wg-tunnels/devices/<mac>/carriers/` | `~/wg-tunnels/devices/<device>/carriers/` |
+| Swept by | `tunnel.sh import` | `singbox.sh build <device>` |
+| Then | installs `config/` for the daemon | turns `config/` into profiles |
+
+The sweep itself is `scripts/wgwarp-sweep.sh`. You only run it by hand to see
+its report: `wgwarp-sweep.sh` for this Mac's device, `wgwarp-sweep.sh iphone`
+for another.
 
 **What it writes.** `carriers/chicago.conf` becomes
 `config/warped.chicago.conf`, with `AllowedIPs` set to the WARP endpoint
 (plus [extras](#extras)), the `DNS` line removed, and
 `PersistentKeepalive = 25`, so the carrier carries WARP and nothing else. The
-`warped.` prefix is how `import` and `build` know a tunnel carries WARP. For
-this Mac, it also says, per tunnel, what to do about the WireGuard app's copy,
-if you keep one there.
+`warped.` prefix is what marks it as warped. For Local Mac Tunnels only, the
+report also says, per tunnel, what to do about the WireGuard app's copy, if
+you keep one there.
 
-**Every time.** A `config/` file is only rewritten when it changes, so edit
-the carrier, not its `warped.*` file. `x.conf`, `warped.x.conf` and
+**Edit the carrier, not the warped file.** Every sweep writes `config/warped.*`
+again from `carriers/` (only when it changes). `x.conf`, `warped.x.conf` and
 `warped-x.conf` in `carriers/` all become `warped.x`; only the first is used
-and the rest are reported. Other files in `config/` are left alone: a
-`warped.*` file whose carrier is gone is reported as `orphan` (delete it
-yourself), anything else as `manual`.
+and the rest are reported. Other files in `config/` are left alone and
+reported: a `warped.*` file whose carrier is gone as `orphan`, anything else
+(a plain tunnel) as `manual`.
 
-**Checks.** `tunnel.sh import` installs a `warped.*` file only if it still
-looks swept: the WARP endpoint is in `AllowedIPs`, nothing is wider than a /8
-(/16 for IPv6), and there's no `DNS` line. One that fails (edited by hand, or
-an orphan) is skipped, not fixed.
+**When a warped tunnel is skipped:**
+
+- **Local Mac Tunnels:** `tunnel.sh import` skips a `warped.*` file that no
+  longer looks swept (the WARP endpoint missing from `AllowedIPs`, an entry
+  wider than a /8 or /16 for IPv6, or a `DNS` line): usually one edited by
+  hand. An orphan still looks swept, so it's imported until you delete it.
+- **Sing-Box Device Tunnels:** `singbox.sh build` skips a `warped.*` file
+  whose carrier is missing from `carriers/` or unusable, orphans included.
 
 ### Extras
 
@@ -228,9 +239,10 @@ wireguard-tools server repo, not the Homebrew package of the same name):
 `10.9.8.1` is the server, `10.9.8.<number>` a device.
 
 Extras are rebuilt every time: delete a line and they're gone on the next
-`import` or `build`. A `#` after the addresses starts a comment. Entries wider than a /8
-(/16 for IPv6) would take traffic away from WARP, so they're ignored and
-reported, as is anything that isn't an address (a hostname, a typo).
+`tunnel.sh import` or `singbox.sh build`. A `#` after the addresses starts a
+comment. Entries wider than a /8 (/16 for IPv6) would take traffic away from
+WARP, so they're ignored and reported, as is anything that isn't an address
+(a hostname, a typo).
 
 ### Small carrier MTU
 
@@ -367,7 +379,7 @@ Start here when a tunnel or the network misbehaves.
   broken.
 - **A warped tunnel connects but nothing loads?** See
   [Small carrier MTU](#small-carrier-mtu). If `import` skipped it, see
-  [Warped tunnels](#warped-tunnels) (checks).
+  [Warped tunnels](#warped-tunnels) ("When a warped tunnel is skipped").
 - **Also using the WireGuard app?** That's fine, with two rules. Turn off On
   Demand for its tunnels: it reconnects behind `up` and breaks the tunnel, so
   `up` refuses while it's on. And switch an app tunnel on only after `down`,
