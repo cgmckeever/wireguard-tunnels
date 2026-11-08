@@ -54,7 +54,7 @@ For the server side (a WireGuard server that exits through WARP itself), see
 There are two separate setups, one for this Mac and one for phones and other
 devices. Use either, or both:
 
-| | Mac tunnels | sing-box devices |
+| | [Local Mac Tunnels](#local-mac-tunnels) | [Sing-Box Device Tunnels](#sing-box-device-tunnels) |
 |---|---|---|
 | For | This Mac's own traffic | iPhone, iPad, Apple TV, Android (the Mac too, if you like) |
 | Runs the tunnels | A root daemon on the Mac (`wg-quick` under launchd) | The [sing-box](https://sing-box.sagernet.org) app on the device |
@@ -62,13 +62,13 @@ devices. Use either, or both:
 | Kill switch | Yes: nothing leaves outside a tunnel, even if it fails | Only while the app runs |
 | Install | `install.sh` | `install.sh --sing-box` |
 
-**Mac tunnels.** The WireGuard app's tunnels on a Mac belong to one macOS
+**Local Mac Tunnels.** The WireGuard app's tunnels on a Mac belong to one macOS
 user and stop passing traffic after a user switch. Here a root daemon runs
 them instead: they work for every user, come back after a reboot, are
 restarted when they fail, and a kill switch blocks traffic whenever a tunnel
 is wanted but down.
 
-**sing-box devices.** iOS, tvOS and Android can't run the daemon, and their
+**Sing-Box Device Tunnels.** iOS, tvOS and Android can't run the daemon, and their
 WireGuard app can't put one tunnel inside another. The sing-box app can.
 `singbox.sh` turns a device's configs into sing-box profiles on your Mac; you
 import them in the app on the device. The Mac is only a workbench here: the
@@ -86,8 +86,8 @@ On your Mac (macOS and [Homebrew](https://brew.sh) needed):
 2. **Install one of the two.** Run it as yourself, not with `sudo`.
    ```sh
    cd ~/Documents/code/wireguard-tunnels
-   ./install.sh              # Mac tunnels (and everything sing-box devices need too)
-   ./install.sh --sing-box   # sing-box devices only
+   ./install.sh              # Local Mac Tunnels (and all Sing-Box Device Tunnels need)
+   ./install.sh --sing-box   # Sing-Box Device Tunnels only
    ```
    Which one: if you want **this Mac's** traffic tunneled, `./install.sh`;
    add `--swiftbar` for the menu bar lock. If you only want tunnels on
@@ -127,7 +127,7 @@ what's missing or out of date, and prints `ok` or `changed`.
 | `--device <name>` | The device name, without asking: this Mac's, or with `--sing-box` the first device's. Needed the first time when there's no terminal (e.g. Ansible) |
 | `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar, the plugin, and a LaunchAgent that keeps SwiftBar running |
 | `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt. Then run `tunnel.sh install`, or as root (e.g. Ansible `become`): `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
-| `--sing-box` | Only what sing-box devices need (above). Takes only `--device` |
+| `--sing-box` | Only what Sing-Box Device Tunnels need (above). Takes only `--device` |
 
 It reads `WARP_ENDPOINT` ([WARP endpoint](#warp-endpoint)).
 
@@ -138,7 +138,7 @@ in `~/wg-tunnels/devices/`, with its own keys and its own WARP account:
 
 ```
 ~/wg-tunnels/devices/
-  .default     this Mac's device name, e.g. mbp-1 (Mac tunnels only)
+  .default     this Mac's device name, e.g. mbp-1 (Local Mac Tunnels only)
   mbp-1/       this Mac
   iphone/      a sing-box device
 ```
@@ -153,8 +153,8 @@ configs name the device (wireguard-tools' `dengar.mbp-1.conf` belongs in
 | `carriers/` | Carrier configs, as downloaded from your provider or server: each becomes a [warped tunnel](#warped-tunnels), `config/warped.<name>.conf` | both |
 | `config/` | Every tunnel, one `.conf` each; the file name is the tunnel name. Plain configs go here as they are; the `warped.*` files are written for you | both |
 | `warp/` | The device's own WARP account (`wgcf-account.toml`, `wgcf-profile.conf`) | both |
-| `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*, for `tunnel.sh extract` | Mac tunnels |
-| `sing-box/` | The profiles `singbox.sh build` writes, to import in the app | sing-box |
+| `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*, for `tunnel.sh extract` | Local Mac Tunnels |
+| `sing-box/` | The profiles `singbox.sh build` writes, to import in the app | Sing-Box Device Tunnels |
 
 They're all `0700`: everything in `~/wg-tunnels` holds private keys. Nothing
 here sends them anywhere; only the sing-box profiles you send yourself leave
@@ -179,8 +179,8 @@ time.
 ## Warped tunnels
 
 Both setups make warped tunnels the same way: put the carrier's config in the
-device's `carriers/`, and `tunnel.sh import` (Mac tunnels) or
-`singbox.sh build` (sing-box devices) turns it into a warped tunnel in
+device's `carriers/`, and `tunnel.sh import` (Local Mac Tunnels) or
+`singbox.sh build` (Sing-Box Device Tunnels) turns it into a warped tunnel in
 `config/` first. That step is `scripts/wgwarp-sweep.sh` (the *sweep*); you
 can also run it on its own (`wgwarp-sweep.sh` for this Mac,
 `wgwarp-sweep.sh iphone` for a device).
@@ -241,10 +241,10 @@ where WARP connects. `install.sh`, `wgwarp-sweep.sh`, `singbox.sh` and
 `tunnel.sh rotate-warp` all read it, and they must agree: if the sweep used a
 different endpoint from the daemon's `warp.conf`, `import` skips every warped
 tunnel. To change it, export it in your shell profile, then re-run
-`install.sh` and `tunnel.sh import` (Mac tunnels), or `singbox.sh build` for
+`install.sh` and `tunnel.sh import` (Local Mac Tunnels), or `singbox.sh build` for
 each sing-box device.
 
-## Mac tunnels
+## Local Mac Tunnels
 
 Tunnels on this Mac, run by a root daemon, with a kill switch and an optional
 menu bar lock.
@@ -434,7 +434,7 @@ brew uninstall --cask swiftbar                            # if nothing else uses
 
 And the packages, if nothing else uses them: `brew uninstall wgcf wireguard-tools`.
 
-## sing-box devices
+## Sing-Box Device Tunnels
 
 Tunnels on an iPhone, iPad, Apple TV or Android device, warped ones included,
 through the [sing-box](https://sing-box.sagernet.org) app: a WireGuard
@@ -578,7 +578,7 @@ It reads `WARP_ENDPOINT` ([WARP endpoint](#warp-endpoint)).
 ### sing-box on this Mac
 
 The sing-box Mac app can run this Mac's tunnels instead of the daemon. Build
-the Mac like any other device (without Mac tunnels, make it first with
+the Mac like any other device (without Local Mac Tunnels, make it first with
 `singbox.sh new mbp-1`):
 
 ```sh

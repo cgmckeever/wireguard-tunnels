@@ -7,7 +7,7 @@
 #   ./install.sh [--device <name>] [--swiftbar] [--no-daemon]
 #   ./install.sh --sing-box [--device <name>]
 #
-#   (default)     Mac tunnels, and what sing-box devices need too.
+#   (default)     Local Mac Tunnels, and what Sing-Box Device Tunnels need too.
 #                 Homebrew packages wireguard-tools, wgcf and jq; this Mac's device
 #                 folder ~/wg-tunnels/devices/<name> (asked the first time, then
 #                 kept in ~/wg-tunnels/devices/.default);
@@ -25,9 +25,9 @@
 #   --sing-box [--device <name>]
 #                 Only what building sing-box profiles needs (singbox.sh): wgcf,
 #                 jq, ~/wg-tunnels/devices and a first device (asked, or
-#                 --device; singbox.sh new makes more). No Mac tunnels: no
+#                 --device; singbox.sh new makes more). No Local Mac Tunnels: no
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
-#                 without --sing-box to add Mac tunnels later
+#                 without --sing-box to add Local Mac Tunnels later
 #
 # Override the WARP endpoint with WARP_ENDPOINT (default 162.159.192.1:2408).
 
@@ -64,7 +64,7 @@ changed() { printf '  changed  %s\n' "$*"; }
 
 [ "$(uname -s)" = Darwin ] || die "macOS only"
 [ "$singbox_only" = 0 ] || { [ "$swiftbar" = 0 ] && [ "$daemon" = 1 ]; } \
-    || die "--sing-box takes only --device: it sets up no Mac tunnels"
+    || die "--sing-box takes only --device: it sets up no Local Mac Tunnels"
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] || die "WARP_ENDPOINT is IPv4:port, e.g. 162.159.192.1:2408"
 [ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
 
@@ -81,7 +81,7 @@ BREW_PREFIX="$(brew --prefix)"
 ok "brew ($BREW_PREFIX)"
 
 # wireguard-tools brings wg, wg-quick, wireguard-go and the bash wg-quick needs
-# (Mac tunnels); wgcf makes WARP accounts; jq writes sing-box profiles
+# (Local Mac Tunnels); wgcf makes WARP accounts; jq writes sing-box profiles
 pkgs="wireguard-tools wgcf jq"
 [ "$singbox_only" = 1 ] && pkgs="wgcf jq"
 for pkg in $pkgs; do
@@ -130,12 +130,12 @@ if [ "$singbox_only" = 1 ]; then
         echo "== device $device"
         "$REPO/scripts/singbox.sh" new "$device" || die "singbox.sh new $device failed"
     else
-        echo "Done (sing-box devices only). Next:"
+        echo "Done (Sing-Box Device Tunnels only). Next:"
         echo "  $REPO/scripts/singbox.sh new <device>      e.g. iphone"
         echo "  put its configs in $DEVICES/<device>/carriers (or config)"
         echo "  $REPO/scripts/singbox.sh build <device>"
     fi
-    echo "Mac tunnels later: $REPO/install.sh (without --sing-box)"
+    echo "Local Mac Tunnels later: $REPO/install.sh (without --sing-box)"
     exit 0
 fi
 
