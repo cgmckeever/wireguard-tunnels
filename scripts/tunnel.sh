@@ -10,14 +10,16 @@
 #   tunnel.sh down          Everything down, back to the normal connection
 #   tunnel.sh [status]      Tunnels, what's up, handshakes, the exit
 #   tunnel.sh list          Number the warped and other tunnels
-#   tunnel.sh extract [zip] Replace ~/wg-tunnels/local/config with the .conf
-#                           files in the newest zip in ~/wg-tunnels/local/exports
-#                           (or the one given): the zip is the authority,
-#                           configs not in it are removed. The zip is kept.
+#   tunnel.sh extract [zip] Replace config/ with the .conf files in the newest
+#                           zip in exports/ (or the one given): the zip is the
+#                           authority, configs not in it are removed. The zip is kept.
 #   tunnel.sh import [dir] [-y]
-#                           Install every .conf in ~/wg-tunnels/local/config
-#                           (or dir) for the daemon. Tunnels gone from it are removed.
+#                           Install every .conf in config/ (or dir) for the
+#                           daemon. Tunnels gone from it are removed.
 #                           Shows what it would do and asks first (-y: don't ask).
+#   tunnel.sh default [device]
+#                           Show or pick this Mac's device folder (asked the
+#                           first time a command needs it)
 #   tunnel.sh extract-import
 #                           Both: extract, then import
 #   tunnel.sh install       Install /usr/local/sbin/wg-tunnels and its LaunchDaemon
@@ -38,10 +40,11 @@
 # install.sh (in this repo) sets up what this needs: wireguard-tools, wgcf,
 # this Mac's WARP account and config, and the daemon.
 #
-# ~/wg-tunnels/local/config holds every tunnel's .conf; `tunnel.sh import`
-# installs them.
-# Fill it by hand, or from the WireGuard app: Export Tunnels to Zip into
-# ~/wg-tunnels/local/exports, then `tunnel.sh extract-import`. The app is optional.
+# ~/wg-tunnels/devices/<device>/ is one device's tunnels; devices/.default
+# names this Mac's (`tunnel.sh default`). extract, import, rotate-warp and the sweep
+# use that folder: config/ holds every tunnel's .conf, and `tunnel.sh import`
+# installs them. Fill it by hand, or from the WireGuard app: Export Tunnels to
+# Zip into exports/, then `tunnel.sh extract-import`. The app is optional.
 # Activate tunnels with `tunnel.sh up`. A non-warped tunnel can still be switched
 # on in the app, but only after `tunnel.sh down` (the kill switch below would
 # swallow its traffic).
@@ -83,8 +86,8 @@ STATE="$ETC/state"                     # desired, last-warped, last-other
 WARP_SRC="$PREFIX/etc/wireguard/warp.conf"  # written by install.sh
 WG_RUN="${WGT_WG_RUN:-/var/run/wireguard}"  # wg-quick's <iface>.name -> utunN
 
-EXPORTS="$HOME/wg-tunnels/local/exports"   # WireGuard app "Export Tunnels to Zip"
-CONFIGS="$HOME/wg-tunnels/local/config"    # every tunnel's .conf: what import installs
+TUNNELS="$HOME/wg-tunnels/devices"      # one folder per device
+DEFAULT_FILE="$TUNNELS/.default"        # this Mac's device: one line, its folder name
 WAIT_SECS=30
 WATCH_SECS=30
 NET_SECS=5      # how often to look for a network change (cheap: no wg calls)
@@ -107,6 +110,77 @@ log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
 need_root() {
     [ "$(id -u)" -eq 0 ] || [ -n "$WGT_TEST" ] || die "$1 needs root"
+}
+
+# --- this Mac's device folder ---
+
+# devices: the device folders in ~/wg-tunnels, one per line
+devices() {
+    local d
+    for d in "$TUNNELS"/*/; do
+        [ -d "$d" ] && basename "$d"
+    done
+}
+
+# old_layout: stop on ~/wg-tunnels/local and sing-box/<device>, from before
+# every device had its own folder in devices/
+old_layout() {
+    local top="$HOME/wg-tunnels"
+    [ -d "$top/local" ] || [ -d "$top/sing-box" ] || return 0
+    die "${top} has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
+  mkdir -p ${top}/devices
+  mv ${top}/local ${top}/devices/<this Mac's name, e.g. mbp-1>
+  mv ${top}/sing-box/* ${top}/devices/ && rmdir ${top}/sing-box
+  (and in each device folder: mv profiles sing-box)"
+}
+
+# default [device]: show or pick this Mac's device folder, saved in
+# ~/wg-tunnels/devices/.default. Changing it leaves the daemon's tunnels alone.
+cmd_default() {
+    local cur pick answer i devs=()
+    cur=$(cat "$DEFAULT_FILE" 2>/dev/null)
+    old_layout
+    while read -r i; do devs+=("$i"); done < <(devices)
+    pick="$1"
+    if [ -z "$pick" ]; then
+        [ ${#devs[@]} -gt 0 ] || die "No device folders in ${TUNNELS} yet: install.sh makes this Mac's"
+        echo "Device folders in ${TUNNELS}; the default is this Mac's (extract, import,"
+        echo "rotate-warp and wgwarp-sweep.sh use it):"
+        for i in "${!devs[@]}"; do
+            printf '  %d) %s%s\n' $((i + 1)) "${devs[i]}" "$([ "${devs[i]}" = "$cur" ] && echo '   (default)')"
+        done
+        [ -t 0 ] || { [ -n "$cur" ] || echo "No default yet: run tunnel.sh default in a terminal"; return 0; }
+        read -rp "Default [${cur:-pick one}]: " answer
+        if [ -z "$answer" ]; then
+            [ -n "$cur" ] || die "Nothing picked"
+            return 0
+        elif [[ "$answer" =~ ^[0-9]+$ ]] && [ "$answer" -ge 1 ] && [ "$answer" -le ${#devs[@]} ]; then
+            pick="${devs[answer - 1]}"
+        else
+            pick="$answer"
+        fi
+    fi
+    [ -d "$TUNNELS/$pick" ] && [[ "$pick" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] \
+        || die "No device folder ${TUNNELS}/${pick}"
+    [ "$pick" = "$cur" ] && { echo "default: ${pick}"; return 0; }
+    put "$DEFAULT_FILE" "$pick" 644 || die "Can't write ${DEFAULT_FILE}"
+    echo "default: ${pick}"
+    [ -z "$cur" ] || echo "The daemon's tunnels are unchanged: tunnel.sh import installs ${pick}'s"
+}
+
+# mac_dir: this Mac's device folder (asks for it the first time, in a terminal)
+mac_dir() {
+    local dev
+    old_layout
+    dev=$(cat "$DEFAULT_FILE" 2>/dev/null)
+    if [ -z "$dev" ]; then
+        [ -t 0 ] || die "No default device yet: run tunnel.sh default in a terminal"
+        cmd_default >&2 || exit 1
+        dev=$(cat "$DEFAULT_FILE" 2>/dev/null)
+        [ -n "$dev" ] || exit 1
+    fi
+    [ -d "$TUNNELS/$dev" ] || die "The default device ${dev} has no folder ${TUNNELS}/${dev}: tunnel.sh default to pick another"
+    echo "$TUNNELS/$dev"
 }
 
 # Write $2 to $1 atomically (new inode), mode $3
@@ -658,7 +732,7 @@ EOF
 tunnel_dns() {
     local f home
     home=$(eval echo "~${SUDO_USER:-root}")
-    for f in "$WARP_SRC" "$CONF"/*.conf "$home"/wg-tunnels/local/{warp,config,carriers}/*.conf; do
+    for f in "$WARP_SRC" "$CONF"/*.conf "$home"/wg-tunnels/devices/*/{warp,config,carriers}/*.conf; do
         [ -f "$f" ] || continue
         awk -F'[[:space:]]*=[[:space:]]*' 'tolower($1) ~ /^[[:space:]]*dns$/ {print $2}' "$f"
     done | tr ', ' '\n\n' | grep . | sort -u
@@ -940,11 +1014,12 @@ It reconnects behind the tunnel and breaks it. Turn it off (the tunnel → Edit 
     follow "$(cat "$RUN/request")"
 }
 
-# rotate-warp: a new WARP account in ~/wg-tunnels/local/warp. The old one waits in
+# rotate-warp: a new WARP account in this Mac's warp/. The old one waits in
 # warp.old until the new one is imported, and comes back if registering fails.
 cmd_rotate_warp() {
-    local warp="$HOME/wg-tunnels/local/warp" old inst active kind
+    local warp old inst active kind
     [ "$(id -u)" -ne 0 ] || die "rotate-warp: run it as your user, not root"
+    warp="$(mac_dir)/warp" || exit 1
     inst="$(cd "$(dirname "$0")/.." && pwd)/install.sh"
     [ -x "$inst" ] || die "rotate-warp: no install.sh next to $0 (run the repo's scripts/tunnel.sh)"
     old="$warp.old"
@@ -1007,6 +1082,7 @@ status() {
     echo "warped:"; load_tunnels warped; list warped
     echo; echo "other:"; load_tunnels other; list other
     echo
+    [ -s "$DEFAULT_FILE" ] && echo "device: $(cat "$DEFAULT_FILE") (tunnel.sh default)"
     if [ ! -f "$RUN/status" ]; then
         echo "daemon: not running (tunnel.sh install)"
     else
@@ -1025,11 +1101,13 @@ status() {
     exit_line
 }
 
-# extract [zip]: the newest export zip (or the one given) becomes ~/wg-tunnels/local/config.
-# The zip is the authority: every .conf in config/ is replaced, and ones not
-# in the zip are removed. The zip is kept.
+# extract [zip]: the newest export zip in this Mac's exports/ (or the one
+# given) becomes its config/. The zip is the authority: every .conf in config/
+# is replaced, and ones not in the zip are removed. The zip is kept.
 cmd_extract() {
-    local zip="${1:-}" tmp f name n=0
+    local zip="${1:-}" tmp f name n=0 dir EXPORTS CONFIGS
+    dir=$(mac_dir) || exit 1
+    EXPORTS="$dir/exports" CONFIGS="$dir/config"
     if [ -z "$zip" ]; then
         zip=$(ls -t "$EXPORTS"/*.zip 2>/dev/null | head -1)
         [ -n "$zip" ] || die "No zip in ${EXPORTS} — WireGuard app → Export Tunnels to Zip… into ${EXPORTS}"
@@ -1060,7 +1138,7 @@ cmd_extract() {
     rm -rf "$tmp"
 }
 
-# import [dir]: install every .conf in ~/wg-tunnels/local/config (or dir) for the
+# import [dir]: install every .conf in this Mac's config/ (or dir) for the
 # daemon. Tunnels no longer there are removed (unless up right now).
 # import [dir] [-y]: shows what it would do and asks first; -y, or no terminal
 # (the menu bar), goes ahead without asking
@@ -1069,7 +1147,7 @@ cmd_import() {
     for a in "$@"; do
         case "$a" in -y|--yes) yes=1 ;; "") ;; *) src="$a" ;; esac
     done
-    src="${src:-$CONFIGS}"
+    [ -n "$src" ] || { src=$(mac_dir) || exit 1; src="$src/config"; }
     check_installed
     [ -d "$src" ] || die "No folder ${src} — tunnel.sh extract (from an export zip), or put .conf files there"
     for f in "$src"/*.conf; do [ -f "$f" ] && n=$((n + 1)); done
@@ -1090,12 +1168,13 @@ cmd_import() {
 case "${1:-status}" in
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
-    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | install | uninstall | rotate-warp | log | breakglass" ;;
+    status)    check_installed; status; echo; echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | default [device] | install | uninstall | rotate-warp | log | breakglass" ;;
     list)      echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other ;;
     extract)   cmd_extract "$2" ;;
     import)    shift; cmd_import "$@" ;;
     extract-import) cmd_extract "$2" && cmd_import ;;
     rotate-warp) cmd_rotate_warp ;;
+    default)   cmd_default "$2" ;;
     install)   sudo "$0" _install "$0" ;;
     uninstall) [ -x "$INSTALLED" ] && sudo "$INSTALLED" _uninstall ;;
     log)       tail -f "$LOG" ;;
@@ -1106,5 +1185,5 @@ case "${1:-status}" in
     _install)  cmd_install_root "$2" ;;
     _uninstall) cmd_uninstall_root ;;
     _breakglass) cmd_breakglass_root ;;
-    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | install | uninstall | rotate-warp | log | breakglass" >&2; exit 1 ;;
+    *) echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import | default [device] | install | uninstall | rotate-warp | log | breakglass" >&2; exit 1 ;;
 esac

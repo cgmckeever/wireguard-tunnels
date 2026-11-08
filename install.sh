@@ -4,11 +4,17 @@
 # out of date. Each step prints "ok" or "changed".
 #
 # Usage:
-#   ./install.sh [--swiftbar] [--no-daemon]
+#   ./install.sh [--device <name>] [--swiftbar] [--no-daemon]
 #
-#   (default)     Homebrew packages wireguard-tools and wgcf; ~/wg-tunnels/local;
+#   (default)     Homebrew packages wireguard-tools and wgcf; this Mac's device
+#                 folder ~/wg-tunnels/devices/<name> (asked the first time, then
+#                 kept in ~/wg-tunnels/devices/.default);
 #                 a Cloudflare WARP account and $(brew --prefix)/etc/wireguard/warp.conf;
 #                 the daemon (/usr/local/sbin/wg-tunnels + LaunchDaemon, sudo)
+#   --device <name>
+#                 This Mac's device name, without asking (e.g. mbp-1: the name
+#                 its wg-tools configs end in). Needed the first time when
+#                 there's no terminal to ask in (Ansible)
 #   --swiftbar    Also the menu bar lock: SwiftBar, the tunnel-status plugin
 #                 (a symlink into SwiftBar's plugin folder) and a LaunchAgent
 #                 that keeps SwiftBar running (skipped if one already does)
@@ -21,22 +27,25 @@ set -u
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 TUNNELS_DIR="$HOME/wg-tunnels"
-LOCAL_DIR="$TUNNELS_DIR/local"     # this Mac's tunnels (sing-box/ is singbox.sh's)
-WARP_DIR="$LOCAL_DIR/warp"
+DEVICES="$TUNNELS_DIR/devices"         # one folder per device
+DEFAULT_FILE="$DEVICES/.default"       # this Mac's device (tunnel.sh default)
 WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
 INSTALLED="/usr/local/sbin/wg-tunnels"
 PLIST="/Library/LaunchDaemons/com.local.wg-tunnels.plist"
 SWIFTBAR_APP="/Applications/SwiftBar.app"
 SWIFTBAR_AGENT="$HOME/Library/LaunchAgents/com.local.swiftbar.plist"
 
-swiftbar=0 daemon=1
-for arg in "$@"; do
-    case "$arg" in
+swiftbar=0 daemon=1 device=""
+while [ $# -gt 0 ]; do
+    case "$1" in
         --swiftbar)  swiftbar=1 ;;
         --no-daemon) daemon=0 ;;
+        --device)    device="${2:-}"; shift ;;
+        --device=*)  device="${1#--device=}" ;;
         -h|--help)   sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
-        *) echo "Unknown option: $arg (see --help)" >&2; exit 1 ;;
+        *) echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
     esac
+    shift
 done
 
 die() { echo "$*" >&2; exit 1; }
@@ -69,23 +78,44 @@ for pkg in wireguard-tools wgcf; do
 done
 
 echo "== ~/wg-tunnels"
-# carriers/ config/ exports/ warp/ straight in ~/wg-tunnels are the old layout:
-# carrying on would register a second WARP account and strand those configs
+# Earlier layouts: carriers/ config/ exports/ warp/ straight in ~/wg-tunnels,
+# or local/ and sing-box/<device>/. Carrying on would register a second WARP
+# account and strand those configs.
 for d in carriers config exports warp; do
-    [ -e "$TUNNELS_DIR/$d" ] || continue
-    [ -e "$LOCAL_DIR/$d" ] && die "Both $TUNNELS_DIR/$d (the old layout) and $LOCAL_DIR/$d exist: keep one, in $LOCAL_DIR"
-    die "$TUNNELS_DIR/$d is the old layout: this Mac's folders go in $LOCAL_DIR. Move it first:
-    mkdir -p \"$LOCAL_DIR\" && mv \"$TUNNELS_DIR/$d\" \"$LOCAL_DIR/\""
+    [ -e "$TUNNELS_DIR/$d" ] && die "$TUNNELS_DIR/$d is an old layout: this Mac's folders go in $DEVICES/<this Mac's name, e.g. mbp-1>. Move it first:
+    mkdir -p $DEVICES/<name> && mv $TUNNELS_DIR/$d $DEVICES/<name>/"
 done
+if [ -d "$TUNNELS_DIR/local" ] || [ -d "$TUNNELS_DIR/sing-box" ]; then
+    die "$TUNNELS_DIR has the old layout (local/, sing-box/): every device gets its own folder in devices/ now. Move them first:
+  mkdir -p $DEVICES
+  mv $TUNNELS_DIR/local $DEVICES/<this Mac's name, e.g. mbp-1>
+  mv $TUNNELS_DIR/sing-box/* $DEVICES/ && rmdir $TUNNELS_DIR/sing-box
+  (and in each device folder: mv profiles sing-box)"
+fi
+
+# This Mac's device: --device, else ~/wg-tunnels/.default, else ask
+valid_name() { [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]]; }
+[ -n "$device" ] || device=$(cat "$DEFAULT_FILE" 2>/dev/null)
+if [ -z "$device" ]; then
+    [ -t 0 ] || die "This Mac's device name, please: ./install.sh --device <name> (e.g. mbp-1, the name its wg-tools configs end in)"
+    existing=$(cd "$DEVICES" 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | paste -sd' ' -)
+    [ -n "$existing" ] && echo "  device folders: $existing"
+    read -rp "  This Mac's device name (a folder in ~/wg-tunnels/devices; e.g. mbp-1, the name its wg-tools configs end in): " device
+fi
+valid_name "$device" || die "Device names are letters, digits, . _ - (not starting with .): $device"
+DEV_DIR="$DEVICES/$device"
+WARP_DIR="$DEV_DIR/warp"
+
 umask 077    # until warp.conf is written: everything here holds private keys
 # 0700: everything under ~/wg-tunnels holds private keys
-#   local/       this Mac's tunnels:
-#     carriers/  WireGuard configs to carry WARP (wgwarp-sweep.sh)
-#     config/    every tunnel's .conf: what tunnel.sh import installs
-#     exports/   WireGuard app "Export Tunnels to Zip" (every private key, plain text)
-#     warp/      the wgcf WARP account and profile
-#   sing-box/    other devices' tunnels, made by singbox.sh
-for d in "$TUNNELS_DIR" "$LOCAL_DIR" "$LOCAL_DIR/carriers" "$LOCAL_DIR/config" "$LOCAL_DIR/exports" "$WARP_DIR"; do
+#   devices/         one folder per device; .default names this Mac's
+#     <device>/      this Mac's tunnels (other devices' sit beside it: singbox.sh new)
+#       carriers/    WireGuard configs to carry WARP (wgwarp-sweep.sh)
+#       config/      every tunnel's .conf: what tunnel.sh import installs
+#       exports/     WireGuard app "Export Tunnels to Zip" (every private key, plain text)
+#       warp/        the wgcf WARP account and profile
+#       sing-box/    profiles from singbox.sh build, if you use sing-box here
+for d in "$TUNNELS_DIR" "$DEVICES" "$DEV_DIR" "$DEV_DIR/carriers" "$DEV_DIR/config" "$DEV_DIR/exports" "$WARP_DIR"; do
     if [ -d "$d" ] && [ "$(stat -f %Lp "$d")" = 700 ]; then
         ok "$d"
     else
@@ -93,10 +123,16 @@ for d in "$TUNNELS_DIR" "$LOCAL_DIR" "$LOCAL_DIR/carriers" "$LOCAL_DIR/config" "
         changed "$d"
     fi
 done
+if [ "$(cat "$DEFAULT_FILE" 2>/dev/null)" = "$device" ]; then
+    ok "default device $device"
+else
+    printf '%s\n' "$device" > "$DEFAULT_FILE" && chmod 644 "$DEFAULT_FILE" || die "Can't write $DEFAULT_FILE"
+    changed "default device $device ($DEFAULT_FILE; tunnel.sh default changes it)"
+fi
 
 echo "== Cloudflare WARP"
-# This Mac's free WARP account, created once in ~/wg-tunnels/local/warp (each
-# sing-box device has its own: singbox.sh new)
+# This Mac's free WARP account, created once in its device's warp/ (every
+# other device has its own: singbox.sh new)
 if [ -f "$WARP_DIR/wgcf-account.toml" ]; then
     ok "account"
 else
@@ -137,7 +173,7 @@ mkdir -p "$BREW_PREFIX/etc/wireguard" && chmod 700 "$BREW_PREFIX/etc/wireguard"
 umask 077
 tmp=$(mktemp "$BREW_PREFIX/etc/wireguard/.warp.XXXXXX") || die "mktemp failed"
 cat > "$tmp" <<EOF
-# Written by wireguard-tunnels install.sh from ~/wg-tunnels/local/warp/wgcf-profile.conf.
+# Written by wireguard-tunnels install.sh from ~/wg-tunnels/devices/${device}/warp/wgcf-profile.conf.
 #
 # Cloudflare WARP exit, carried inside another WireGuard tunnel (warped.*). \`tunnel.sh import\`
 # copies it for the wg-tunnels daemon, which does the
@@ -274,7 +310,7 @@ fi
 
 echo
 echo "Done. Next:"
-echo "  put tunnel .conf files in $LOCAL_DIR/config (or carriers in $LOCAL_DIR/carriers, then $REPO/scripts/wgwarp-sweep.sh)"
+echo "  put tunnel .conf files in $DEV_DIR/config (or carriers in $DEV_DIR/carriers, then $REPO/scripts/wgwarp-sweep.sh)"
 echo "  $REPO/scripts/tunnel.sh import"
 echo "  $REPO/scripts/tunnel.sh up"
 echo "  other devices (iPhone, Apple TV): $REPO/scripts/singbox.sh new <device>"

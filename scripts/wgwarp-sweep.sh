@@ -3,10 +3,10 @@
 # Any WireGuard server works as the carrier.
 #
 # Usage:
-#   wgwarp-sweep.sh          this Mac: ~/wg-tunnels/local/carriers -> config
-#   wgwarp-sweep.sh <dir>    any folder with carriers/ and config/, e.g. a
-#                            sing-box device's (singbox.sh build runs this);
-#                            no WireGuard app column then
+#   wgwarp-sweep.sh             this Mac's device folder (~/wg-tunnels/devices/
+#                               .default, set by tunnel.sh default): carriers/ -> config/
+#   wgwarp-sweep.sh <device>    ~/wg-tunnels/devices/<device> (singbox.sh build runs this)
+#   wgwarp-sweep.sh <dir>       any folder with carriers/ and config/
 #
 # Reads every carriers/<name>.conf (as downloaded from the provider) and writes
 # config/warped.<name>.conf: AllowedIPs set to the WARP endpoint (plus the
@@ -19,7 +19,7 @@
 # singbox.sh build only check it. The warped. prefix is how they know a tunnel
 # carries WARP.
 #
-# On this Mac, the last column compares each one with the WireGuard app's
+# For this Mac's device, the last column compares each one with the WireGuard app's
 # tunnel of the same name (the app can't be scripted, so only its server
 # address is visible) and says what to do there by hand. Only for tunnels you
 # also keep in the app.
@@ -29,14 +29,21 @@
 
 die() { echo "wgwarp-sweep.sh: $*" >&2; exit 1; }
 
-APP=1                           # the WireGuard app column: this Mac only
+TUNNELS="$HOME/wg-tunnels/devices"
+MAC=$(cat "$TUNNELS/.default" 2>/dev/null)     # this Mac's device (tunnel.sh default)
+[ $# -le 1 ] || die "usage: wgwarp-sweep.sh [<device>|<dir>]"
 case "$1" in
-    "") DIR="$HOME/wg-tunnels/local" ;;
-    -*) die "usage: wgwarp-sweep.sh [<dir>]" ;;
-    *)  DIR="$1"; APP=""
-        [ -d "$DIR" ] || die "no folder $DIR" ;;
+    "") [ -n "$MAC" ] || die "no default device yet: tunnel.sh default (or give a device or folder)"
+        DIR="$TUNNELS/$MAC" ;;
+    -*) die "usage: wgwarp-sweep.sh [<device>|<dir>]" ;;
+    */*|.|..) DIR="$1" ;;
+    *)  DIR="$TUNNELS/$1"; [ -d "$DIR" ] || DIR="$1" ;;
 esac
-[ $# -le 1 ] || die "usage: wgwarp-sweep.sh [<dir>]"
+[ -d "$DIR" ] || die "no folder $DIR"
+# The WireGuard app column: this Mac's device only
+APP=""
+[ -n "$MAC" ] && [ -d "$TUNNELS/$MAC" ] \
+    && [ "$(cd "$DIR" && pwd -P)" = "$(cd "$TUNNELS/$MAC" && pwd -P)" ] && APP=1
 CARRIER_DIR="$DIR/carriers"
 CONFIG_DIR="$DIR/config"
 WARP_ENDPOINT="${WARP_ENDPOINT:-162.159.192.1:2408}"
