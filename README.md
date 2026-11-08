@@ -1,9 +1,28 @@
 # wireguard-tunnels
 
+*Cloudflare exit IPs, tunneled through your WireGuard region*
+
 WireGuard tunnels on macOS, run by `wg-quick` under a root LaunchDaemon, with
 optional Cloudflare WARP inside any tunnel, a kill switch, and a menu bar lock.
-The same tunnels, WARP inside included, can go to an iPhone or Apple TV as
-sing-box profiles.
+The same tunnels, WARP included, can go to an iPhone or Apple TV as sing-box
+profiles.
+
+Terms used throughout:
+
+- **Device**: a machine that runs tunnels (this Mac, an iPhone, an Apple TV).
+  Each has its own folder, `~/wg-tunnels/devices/<device>/`.
+- **`<mac>`**: this Mac's device name, such as `mbp-1`. It is saved in
+  `~/wg-tunnels/devices/.default`.
+- **Carrier**: a WireGuard tunnel to a VPN provider or your own server, used
+  only to carry WARP.
+- **Warped tunnel**: a carrier with WARP running inside it, named
+  `warped.<name>`. Your traffic exits through WARP.
+- **Extras**: addresses a carrier routes besides WARP, so its server and your
+  device can reach each other ([Warped tunnels](#warped-tunnels)).
+- **Profile**: a sing-box JSON file you import in the sing-box app. The
+  **composite** profile holds all of a device's tunnels, with a picker.
+
+Contents:
 
 - [Why](#why)
 - [Install](#install)
@@ -18,18 +37,19 @@ sing-box profiles.
 
 ## Why
 
+What the daemon and warped tunnels give you over the WireGuard app.
+
 ### Run tunnels under a daemon
 
-Tunnels in the WireGuard app are per-login-session Network Extensions: they
-belong to one macOS user and stop passing traffic after a user switch. Here the
-tunnels run under a root daemon instead, so they work for every user on the
-Mac, come back after a reboot, and are watched and restarted when they fail.
+Tunnels in the WireGuard app are per-login Network Extensions: they belong to
+one macOS user and stop passing traffic after a user switch. Here a root
+daemon runs them instead. They work for every user on the Mac, come back after
+a reboot, and are restarted when they fail.
 
 ### Wrap WARP inside another tunnel
 
-A *warped* tunnel puts Cloudflare WARP inside any WireGuard tunnel (the
-*carrier*: a VPN provider, your own server). The carrier carries only WARP,
-and your traffic exits through WARP:
+A warped tunnel puts Cloudflare WARP inside a carrier. The carrier carries
+only WARP, and your traffic exits through WARP:
 
 ```
 your Mac ──carrier tunnel──▶ carrier server ──WARP tunnel──▶ Cloudflare ──▶ sites
@@ -39,52 +59,51 @@ your Mac ──carrier tunnel──▶ carrier server ──WARP tunnel──▶
 Either tunnel alone falls short:
 
 - **A VPN server alone** exits from a datacenter or VPN IP range. Sites treat
-  those with suspicion: more CAPTCHAs, "unusual traffic" pages, outright
-  blocks.
+  those with suspicion: more CAPTCHAs, "unusual traffic" pages, blocks.
 - **WARP alone** exits from a Cloudflare IP near *you*, so sites still see
   your region, and Cloudflare sees your home IP.
 
 Wrapped, you get both halves:
 
-- **Sites see an ordinary Cloudflare IP.** WARP addresses are shared by
-  millions of everyday WARP users, so they're rarely blocked, unlike VPN and
-  datacenter ranges.
+- **Sites see an ordinary Cloudflare IP.** Millions of everyday WARP users
+  share those addresses, so they're rarely blocked.
 - **You pick the location.** WARP exits from the Cloudflare data center
-  nearest to where it's entered from, and here that's the carrier's server,
-  not you. A carrier in Toronto gives you a Cloudflare exit near Toronto.
+  nearest to where it's entered, which here is the carrier's server. A carrier
+  in Toronto gives you an exit near Toronto.
 - **The traffic is split between two parties.** The carrier sees your IP but
-  only encrypted WARP traffic, not the sites you visit. Cloudflare sees the
-  traffic, but coming from the carrier's IP, not yours. Your local network and
-  ISP see only the carrier tunnel.
-- **It works where WARP is blocked.** A network that blocks WARP directly
-  still reaches the carrier.
+  only encrypted WARP traffic. Cloudflare sees the traffic, but from the
+  carrier's IP. Your local network and ISP see only the carrier tunnel.
+- **It works where WARP is blocked.** A network that blocks WARP still
+  reaches the carrier.
 
-The trade-offs: an extra hop (a little latency, and a smaller MTU of 1280
-inside the carrier), Cloudflare still sees where your traffic goes, and a few
-sites block WARP too. It hides where you are from sites, but it isn't an
-anonymity tool: the WARP account is tied to this Mac. Some streaming services
-flag WARP addresses; for those, a plain tunnel to the carrier's server (a
-second config from the provider, with its own key) is the better pick.
+The trade-offs: an extra hop (a little latency, and an MTU of 1280 inside the
+carrier), Cloudflare still sees where your traffic goes, and a few sites block
+WARP too. It hides your location from sites, but it isn't an anonymity tool:
+the WARP account is tied to this Mac. Some streaming services flag WARP
+addresses; for those, use a plain tunnel to the carrier's server (a second
+config from the provider, with its own key).
 
 ### Tunnel kinds
 
-Each tunnel is one of three kinds, worked out when it's imported:
+`tunnel.sh import` sorts each tunnel into one of three kinds:
 
 | Kind | What | Kill switch |
 |------|------|-------------|
-| **warped** | Named `warped.*`. Any WireGuard tunnel (the *carrier*) that carries only Cloudflare WARP; your traffic exits through WARP, so sites see an ordinary Cloudflare IP in the carrier's city | yes |
+| **warped** | Named `warped.*`: a carrier with WARP inside. Sites see a Cloudflare IP in the carrier's city | yes |
 | **full** | Routes all of IPv4 (`0.0.0.0/0`, or the two `/1` halves) | yes |
 | **split** | Anything else: only the networks in its `AllowedIPs` | no |
 
-The kill switch blocks everything outside the tunnel until you take it down:
-a tunnel failing never falls back to your normal connection.
+The kill switch blocks all traffic outside the tunnel until you run
+`tunnel.sh down`. A failing tunnel never falls back to your normal connection.
 
 For the server side (a WireGuard server that exits through WARP), see
 [wireguard-tools](https://github.com/cgmckeever/wireguard-tools).
 
 ## Install
 
-Requires macOS, [Homebrew](https://brew.sh) and an admin user.
+`install.sh` sets up everything on this Mac: packages, your folders, a WARP
+account and the daemon. It needs macOS, [Homebrew](https://brew.sh) and an
+admin user.
 
 ```sh
 git clone https://github.com/cgmckeever/wireguard-tunnels.git ~/Documents/code/wireguard-tunnels
@@ -92,78 +111,81 @@ git clone https://github.com/cgmckeever/wireguard-tunnels.git ~/Documents/code/w
 ~/Documents/code/wireguard-tunnels/install.sh --swiftbar   # plus the menu bar lock
 ```
 
-The repo can live anywhere; the examples here use
+The repo can live anywhere; this README uses
 `~/Documents/code/wireguard-tunnels`. Run `install.sh` as yourself, not with
-`sudo`: it asks for your password when it needs it.
+`sudo`: it asks for your password when it needs it. The first time, it asks
+for this Mac's device name (`mbp-1`, say).
 
-`install.sh` is safe to re-run (such as after a `git pull`). Each step checks
-first, changes only what's missing or out of date, and prints `ok` or
+`install.sh` is safe to re-run, for example after a `git pull`. Each step
+checks first, changes only what's missing or out of date, and prints `ok` or
 `changed`:
 
 | Step | What |
 |------|------|
-| Homebrew packages | `wireguard-tools` (`wg`, `wg-quick`, `wireguard-go`) and `wgcf` (Cloudflare WARP account tool). Without Homebrew it prints how to install it and stops |
-| `~/wg-tunnels/devices/<mac>` | This Mac's folders, [below](#your-folders), all `0700` (they hold private keys). The first time, it asks for this Mac's device name |
+| Homebrew packages | `wireguard-tools` (`wg`, `wg-quick`, `wireguard-go`) and `wgcf` (the WARP account tool). Without Homebrew it prints how to install it and stops |
+| `~/wg-tunnels/devices/<mac>/` | This Mac's folders ([Your folders](#your-folders)), all `0700` since they hold private keys. Writes `<mac>` to `.default` |
 | WARP | Registers one free WARP account for this Mac (`wgcf register`, which accepts Cloudflare's terms of service) and writes `$(brew --prefix)/etc/wireguard/warp.conf` from it |
-| Daemon | `/usr/local/sbin/wg-tunnels` (a copy of `tunnel.sh`) and the `com.local.wg-tunnels` LaunchDaemon, using `sudo`. Reinstalled when the repo copy differs or the LaunchDaemon is missing |
+| Daemon | Installs `/usr/local/sbin/wg-tunnels` (a copy of `tunnel.sh`) and the `com.local.wg-tunnels` LaunchDaemon, using `sudo`. Only when the repo copy differs or the LaunchDaemon is missing |
 
 | Option | What |
 |--------|------|
-| `--device <name>` | This Mac's device name, without asking. Needed the first time when there's no terminal to ask in (e.g. Ansible) |
-| `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar (Homebrew cask), the plugin and a LaunchAgent that keeps SwiftBar running |
-| `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt (e.g. Ansible). Install the daemon separately as root: `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
+| `--device <name>` | This Mac's device name, without asking. Needed the first time when there's no terminal (e.g. Ansible) |
+| `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar, the plugin, and a LaunchAgent that keeps SwiftBar running |
+| `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt. Then install the daemon as root: `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
 
-`WARP_ENDPOINT` (an IPv4 address and port, default `162.159.192.1:2408`; the
-scripts refuse anything else) is where `warp.conf` points:
-`WARP_ENDPOINT=ip:port ./install.sh`. `wgwarp-sweep.sh`,
-`singbox.sh` and `tunnel.sh rotate-warp` (which re-runs `install.sh`) read it
-too, and it has to be the same for all of them, or `import` skips every warped
-tunnel. If you change it, export it in your shell profile.
+**WARP endpoint.** `WARP_ENDPOINT` (IPv4 `address:port`, default
+`162.159.192.1:2408`) sets where WARP connects: `WARP_ENDPOINT=ip:port
+./install.sh`. `install.sh`, `wgwarp-sweep.sh`, `singbox.sh` and
+`tunnel.sh rotate-warp` all read it, and they must agree: if the sweep used a
+different endpoint from `warp.conf`, `import` skips every warped tunnel. To
+change it, export it in your shell profile, then re-run `install.sh`,
+`wgwarp-sweep.sh` and `tunnel.sh import`.
 
 ### The scripts
 
 | Script | What |
 |--------|------|
-| `install.sh` | Sets everything up: prerequisites, your folders, WARP, the daemon; `--swiftbar` for the menu bar. Safe to re-run |
-| `scripts/tunnel.sh` | The command you use day to day: `up`, `down`, `status`, `import`… ([Commands](#tunnelsh)). Installed as the daemon too |
+| `install.sh` | Sets everything up (above). Safe to re-run |
+| `scripts/tunnel.sh` | The day-to-day command: `up`, `down`, `status`, `import`… ([Commands](#tunnelsh)). Also installed as the daemon |
 | `scripts/wgwarp-sweep.sh` | Turns carrier configs into warped ones ([Warped tunnels](#warped-tunnels)) |
-| `scripts/singbox.sh` | Profiles for an iPhone, Apple TV or other sing-box device, warped tunnels included ([sing-box devices](#sing-box-devices)) |
+| `scripts/singbox.sh` | Builds profiles for an iPhone, Apple TV or other sing-box device ([sing-box devices](#sing-box-devices)) |
 | `scripts/askpass.sh` | Password dialog for `sudo -A`, used by the menu bar; not run by hand |
 | `scripts/swiftbar/tunnel-status.5s.sh` | The SwiftBar plugin; `install.sh --swiftbar` links it in |
 
 ### Your folders
 
-Every device gets a folder in `~/wg-tunnels/devices/`, named the way wg-tools
-names its configs (`dengar.mbp-1.conf` belongs in `mbp-1/`):
+All configs and keys live in `~/wg-tunnels/devices/`, one folder per device.
+Name each folder the way wg-tools names its configs (`dengar.mbp-1.conf`
+belongs in `mbp-1/`):
 
 ```
 ~/wg-tunnels/devices/
-  .default     this Mac's device name: the folder tunnel.sh works in
+  .default     this Mac's device name (one line: mbp-1)
   mbp-1/       this Mac
   iphone/      a sing-box device (singbox.sh new iphone)
 ```
 
-In this README `<mac>` stands for this Mac's device name. `install.sh` asks
-for it the first time and saves it in `.default`; `tunnel.sh default` shows
-or changes it. `extract`, `import`, `rotate-warp` and `wgwarp-sweep.sh` use
-that folder. Changing it doesn't touch the daemon; `import` then installs the
-new device's tunnels.
+`tunnel.sh extract`, `import`, `rotate-warp` and `wgwarp-sweep.sh` work in the
+folder `.default` names. `tunnel.sh default` shows or changes it. Changing it
+doesn't touch the daemon; run `tunnel.sh import` to install the new device's
+tunnels.
 
-`install.sh` creates these folders in `~/wg-tunnels/devices/<mac>/`, each
-`0700` (they hold private keys):
+Inside `~/wg-tunnels/devices/<mac>/` (each `0700`):
 
 | Folder | What goes there |
 |--------|-----------------|
-| `config/` | Every tunnel's `.conf`, one file per tunnel (the file name is the tunnel's name). This is what `tunnel.sh import` installs for the daemon; nothing runs from here directly |
-| `carriers/` | WireGuard configs to wrap WARP inside, as downloaded from your provider or server. `wgwarp-sweep.sh` turns each into `config/warped.<name>.conf`. Only needed for warped tunnels |
-| `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*. `tunnel.sh extract` replaces `config/` with the newest one. Only needed if you use the app; zips are kept |
-| `warp/` | Your Cloudflare WARP account (`wgcf-account.toml`) and profile (`wgcf-profile.conf`), made by `install.sh`. One per Mac; `warp.conf` is built from it |
-| `sing-box/` | Only if you run `singbox.sh build <mac>`: these tunnels as sing-box profiles for the Mac ([sing-box on this Mac](#sing-box-on-this-mac)) |
+| `config/` | Every tunnel's `.conf`, one per tunnel; the file name is the tunnel name. `tunnel.sh import` installs these for the daemon; nothing runs from here directly |
+| `carriers/` | Carrier configs, as downloaded from your provider or server. `wgwarp-sweep.sh` turns each into `config/warped.<name>.conf`. Only for warped tunnels |
+| `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*. `tunnel.sh extract` replaces `config/` with the newest. Only if you use the app; zips are kept |
+| `warp/` | This Mac's WARP account (`wgcf-account.toml`) and profile (`wgcf-profile.conf`), made by `install.sh`. `warp.conf` is built from it |
+| `sing-box/` | Only after `singbox.sh build <mac>`: this Mac's tunnels as sing-box profiles ([sing-box on this Mac](#sing-box-on-this-mac)) |
 
 ## Quick start
 
-The scripts are run by their path; there are no aliases. Add your own if you
-like, e.g. in `~/.zshrc`:
+This takes you from a fresh install to a running tunnel.
+
+The scripts are run by path; there are no aliases. Add your own if you like,
+e.g. in `~/.zshrc`:
 
 ```sh
 alias tunnel=~/Documents/code/wireguard-tunnels/scripts/tunnel.sh
@@ -171,33 +193,43 @@ alias wgwarp-sweep=~/Documents/code/wireguard-tunnels/scripts/wgwarp-sweep.sh
 alias singbox=~/Documents/code/wireguard-tunnels/scripts/singbox.sh
 ```
 
-1. **Add configs** to `~/wg-tunnels/devices/<mac>/config/`, in any of these ways (if you
-   use both of the last two, `extract` first: it replaces all of `config/`,
-   swept `warped.*` files included):
-   - Copy `<name>.conf` files from your VPN provider or server there.
-   - For [warped tunnels](#warped-tunnels): put the carrier's config in
+After this section the README writes just `tunnel.sh`, `wgwarp-sweep.sh` and
+`singbox.sh`.
+
+1. **Add configs** to `~/wg-tunnels/devices/<mac>/config/`, in one or more of
+   these ways:
+   - **Plain tunnel:** copy `<name>.conf` from your VPN provider or server
+     into `config/`.
+   - **[Warped tunnel](#warped-tunnels):** copy the carrier's config into
      `~/wg-tunnels/devices/<mac>/carriers/`, then run
      `~/Documents/code/wireguard-tunnels/scripts/wgwarp-sweep.sh`.
-   - From the WireGuard app: *Export Tunnels to Zip…* into
+     `carriers/chicago.conf` becomes `config/warped.chicago.conf`.
+   - **From the WireGuard app:** *Export Tunnels to Zip…* into
      `~/wg-tunnels/devices/<mac>/exports/`, then run
      `~/Documents/code/wireguard-tunnels/scripts/tunnel.sh extract`.
-2. **Import** them for the daemon:
+
+   `extract` replaces all of `config/` with the zip's configs, removing any
+   you copied or swept. If you mix it with the others, run `extract` first.
+2. **Import** them for the daemon. It shows what will change and asks first:
    ```sh
    ~/Documents/code/wireguard-tunnels/scripts/tunnel.sh import
    ```
-3. **Bring one up**:
+3. **Bring one up.** It asks `warped [Y/n]`, then which tunnel:
    ```sh
    ~/Documents/code/wireguard-tunnels/scripts/tunnel.sh up
    ```
-   It asks `warped [Y/n]`, then which tunnel. `down` takes it back down.
+4. **Check it** with `tunnel.sh status`. `tunnel.sh down` takes it down and
+   returns you to your normal connection.
 
 For an iPhone or Apple TV, see [sing-box devices](#sing-box-devices).
 
 ## Commands
 
+This is the reference for each script's commands.
+
 ### tunnel.sh
 
-`~/Documents/code/wireguard-tunnels/scripts/tunnel.sh <command>`:
+`tunnel.sh <command>`:
 
 | Command | What |
 |---------|------|
@@ -205,66 +237,64 @@ For an iPhone or Apple TV, see [sing-box devices](#sing-box-devices).
 | `down` | Everything down, back to the normal connection |
 | `status` (default) | Tunnels, what's up, handshakes, the kill switch, the exit IP |
 | `list` | Number the warped and other tunnels |
-| `import [dir] [-y]` | Install every `.conf` in `~/wg-tunnels/devices/<mac>/config` (or `dir`) for the daemon and work out each one's kind. Tunnels no longer there are removed, unless up right now. First shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y` (or no terminal, as from the menu bar) skips the question |
-| `extract [zip]` | Replace `~/wg-tunnels/devices/<mac>/config` with the `.conf` files in the newest zip in `~/wg-tunnels/devices/<mac>/exports` (or the one given). The zip is the authority: configs not in it are removed. The zip is kept |
+| `import [dir] [-y]` | Install every `.conf` in `<mac>/config/` (or `dir`) for the daemon, and sort each into its [kind](#tunnel-kinds). Tunnels no longer there are removed, unless up right now. Shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y`, or no terminal (the menu bar), skips the question |
+| `extract [zip]` | Replace `<mac>/config/` with the `.conf` files in the newest zip in `<mac>/exports/` (or the one given). Configs not in the zip are removed. The zip is kept |
 | `extract-import [zip]` | `extract`, then `import` |
-| `default [device]` | Show or change this Mac's device folder ([Your folders](#your-folders)). Asked the first time a command needs it |
-| `rotate-warp` | New Cloudflare WARP keys: registers a new WARP account (through `install.sh`), imports it, and reconnects a warped tunnel that's up. The old account's files are deleted once that works (Cloudflare isn't told), or put back if registering fails. This Mac only: sing-box devices keep their own accounts |
+| `default [device]` | Show or change this Mac's device ([Your folders](#your-folders)). Asked the first time a command needs it |
+| `rotate-warp` | New WARP keys: registers a new WARP account (through `install.sh`), imports it, and reconnects a warped tunnel that's up. The old account's files are deleted once that works (Cloudflare isn't told), or put back if registering fails. This Mac only: sing-box devices keep their own accounts |
 | `log` | Follow the daemon's log |
 | `breakglass` | Lost the network? See [Troubleshooting](#troubleshooting) |
-| `update` | Bring the daemon up to date with the repo's `tunnel.sh`, only when it differs (or its LaunchDaemon is missing): after a `git pull`, say. Restarts the daemon, so a tunnel that's up drops for a few seconds |
-| `install` | Install just the daemon, even when it's current (`install.sh` does this) |
+| `update` | Update the daemon from the repo's `tunnel.sh`, only if it differs (or its LaunchDaemon is missing), e.g. after a `git pull`. Restarts the daemon, so a tunnel that's up drops for a few seconds |
+| `install` | Install just the daemon, even when it's current |
 | `uninstall` | Take everything down and remove the daemon; configs are kept |
 
 `up`, `down`, `import`, `rotate-warp`, `update`, `install`, `uninstall` and
-`breakglass` use `sudo`.
-`up`, `down` and `import` first update the installed daemon when the repo copy
-differs, as `update` does on its own.
+`breakglass` use `sudo`. `up`, `down` and `import` also update the daemon
+first when the repo copy differs, as `update` does.
 
 ### wgwarp-sweep.sh
 
-`~/Documents/code/wireguard-tunnels/scripts/wgwarp-sweep.sh` turns the carrier
-configs in `~/wg-tunnels/devices/<mac>/` into warped ones; see
-[Warped tunnels](#warped-tunnels). For each one it also says what to do about
-the WireGuard app's copy, if you keep one there. Given another device
-(`wgwarp-sweep.sh iphone`) or a folder with a `carriers/` in it, it sweeps
-that one's `carriers/` into its `config/` instead, with nothing about the app: that's how `singbox.sh
-build` sweeps a [sing-box device](#sing-box-devices). It reads `WARP_ENDPOINT`, as
-[install.sh](#install) does.
+`wgwarp-sweep.sh [device|dir]` turns each carrier in `<mac>/carriers/` into a
+warped config in `<mac>/config/` ([Warped tunnels](#warped-tunnels)). For
+this Mac it also says, per tunnel, what to do about the WireGuard app's copy,
+if you keep one there.
+
+Given a device (`wgwarp-sweep.sh iphone`) or a folder with a `carriers/` in
+it, it sweeps that one instead, with no WireGuard app advice. `singbox.sh
+build` runs it this way. It reads `WARP_ENDPOINT` ([Install](#install)).
 
 ### singbox.sh
 
-`~/Documents/code/wireguard-tunnels/scripts/singbox.sh <command>`, for
-[sing-box devices](#sing-box-devices):
+`singbox.sh <command>`, for [sing-box devices](#sing-box-devices):
 
 | Command | What |
 |---------|------|
 | `new <device>` | Make `~/wg-tunnels/devices/<device>/` and register the device's own WARP account (needs `wgcf`) |
-| `build <device>` | Sweep its carriers, then write its profiles into its `sing-box/` (needs `jq`). This Mac is a device too ([sing-box on this Mac](#sing-box-on-this-mac)) |
-| `list` | The devices: how many carriers, tunnels and profiles each has, whether it has a WARP account, and which is this Mac |
+| `build <device>` | Sweep its carriers, then write its profiles into its `sing-box/` (needs `jq`: `brew install jq`). Works for this Mac too ([sing-box on this Mac](#sing-box-on-this-mac)) |
+| `list` | Each device's carriers, tunnels and profiles, whether it has a WARP account, and which is this Mac |
 
-It reads `WARP_ENDPOINT`, as [install.sh](#install) does.
+It reads `WARP_ENDPOINT` ([Install](#install)).
 
 ## Warped tunnels
 
-A warped tunnel is two WireGuard tunnels, one inside the other: the carrier
-(any WireGuard server: a VPN provider, your own server) carries only the WARP
-tunnel, and your traffic exits through WARP. See
-[Why](#wrap-warp-inside-another-tunnel) for what that buys you.
+How a carrier becomes a warped tunnel, and the details that matter when one
+doesn't work. For why you'd want one, see
+[Why](#wrap-warp-inside-another-tunnel).
 
-`wgwarp-sweep.sh` makes the carrier configs: each
-`~/wg-tunnels/devices/<mac>/carriers/<name>.conf` becomes
-`~/wg-tunnels/devices/<mac>/config/warped.<name>.conf`, with `AllowedIPs` set to the WARP
-endpoint (plus the extras below), the `DNS` line removed and
-`PersistentKeepalive = 25`. Everything WARP-specific about a carrier happens
-here: `import` takes a `warped.*` config as it is, and only checks it (the WARP
-endpoint is in `AllowedIPs`, nothing wider than a /8, no `DNS`), skipping one
-that isn't swept rather than fixing it.
+**What the sweep writes.** `wgwarp-sweep.sh` turns each
+`<mac>/carriers/<name>.conf` into `<mac>/config/warped.<name>.conf`. It sets
+`AllowedIPs` to the WARP endpoint (plus extras, below), removes the `DNS`
+line, and sets `PersistentKeepalive = 25`. The `warped.` prefix is how
+`import` knows the tunnel carries WARP.
 
-**Extras: reaching the server through the carrier.** A carrier carries only
-WARP, so the server can't reach your Mac (or the Mac reach the server) unless
-the address is in `AllowedIPs` too. The sweep adds these *extras* from two
-header lines of the carrier file:
+**What import checks.** All WARP-specific changes happen in the sweep.
+`import` takes a `warped.*` config as it is and only checks it: the WARP
+endpoint is in `AllowedIPs`, nothing is wider than a /8 (/16 for IPv6), and
+there's no `DNS` line. A config that fails is skipped, not fixed.
+
+**Extras.** A carrier routes only WARP, so the server can't reach your Mac,
+or your Mac the server, unless that address is in `AllowedIPs` too. The sweep
+adds these extras from two header lines in the carrier file:
 
 ```ini
 # device-network: 10.9.8.0/24     # written by the wireguard-tools server repo
@@ -273,42 +303,42 @@ header lines of the carrier file:
 
 `device-network` is the server's static device addresses (from the
 wireguard-tools server repo, not the Homebrew package of the same name):
-`10.9.8.1` is the server and `10.9.8.<number>` a device, whichever config
-it's using.
+`10.9.8.1` is the server, `10.9.8.<number>` a device.
 
-They're rebuilt on every sweep, so deleting a line and sweeping again removes
-them. A `#` after the addresses starts a comment. Anything wider than a /8 (/16
-for IPv6) is ignored and reported, since it would take traffic away from WARP,
-and so is anything that isn't an address (a hostname, a typo). Two carriers
-that would make the same `warped.` name (`x.conf` and `warped-x.conf`) aren't
-both swept: the second is skipped and reported. The `warped.` prefix is how
-`import` knows the tunnel carries WARP. A `config/` file is only replaced when
-it differs, and other files there are left alone: a `warped.*` file whose
-carrier is gone is listed as `orphan`, anything else as `manual`.
+Extras are rebuilt on every sweep: delete a line and sweep again to remove
+them. A `#` after the addresses starts a comment. Entries wider than a /8
+(/16 for IPv6) would take traffic away from WARP, so they're ignored and
+reported, as is anything that isn't an address (a hostname, a typo).
 
-The WARP side is `$(brew --prefix)/etc/wireguard/warp.conf`, written by
+**Name clashes and leftovers.** `x.conf`, `warped.x.conf` and `warped-x.conf`
+in `carriers/` all become `warped.x`; only the first is swept and the rest are
+reported. A `config/` file is only rewritten when it changes. Other files in
+`config/` are left alone: a swept file whose carrier is gone is listed as
+`orphan`, anything else as `manual`.
+
+**The WARP side** is `$(brew --prefix)/etc/wireguard/warp.conf`, written by
 `install.sh`. Don't bring it up on its own; the daemon starts it inside the
 carrier.
 
-WARP's packets get up to 80 bytes bigger inside the carrier, so a carrier with
-an MTU under 1360 (a server set to 1280, say) can't fit WARP's 1280: ping
-works and nothing else does. The daemon handles it: when the carrier's MTU is
-under 1360 it runs WARP at the carrier's MTU minus 80 (1200 inside a 1280
-carrier) and logs it. Below 1280 there's no IPv6 inside WARP and QUIC falls
-back to TCP; pages still load. The sweep flags these carriers.
+**Small carrier MTU.** WARP's packets grow by up to 80 bytes inside the
+carrier. A carrier with an MTU under 1360 (a server set to 1280, say) can't
+fit WARP's 1280: ping works and nothing else does. The daemon handles it: it
+runs WARP at the carrier's MTU minus 80 (1200 inside a 1280 carrier) and logs
+it. Below 1280 there's no IPv6 inside WARP and QUIC falls back to TCP; pages
+still load. The sweep flags these carriers.
 
 ## sing-box devices
 
-An iPhone, iPad, Apple TV or Android box can't run the daemon, and the
-WireGuard app there can't carry one tunnel inside another.
-[sing-box](https://sing-box.sagernet.org) can (its app is on the App Store): a
-WireGuard endpoint with a `detour` sends its packets through another one, so
+Use this to run the same tunnels, warped ones included, on an iPhone, iPad,
+Apple TV or Android box. Those can't run the daemon, and the WireGuard app
+there can't carry one tunnel inside another.
+[sing-box](https://sing-box.sagernet.org) can (its app is on the App Store):
+a WireGuard endpoint with a `detour` sends its packets through another, so
 WARP rides inside the carrier in one VPN.
 
-Every device has a folder in `~/wg-tunnels/devices/`, laid out like the Mac's:
-the sweep turns `carriers/` into `warped.*` files in `config/`, and
-`singbox.sh build` turns all of `config/` into profiles in `sing-box/`, to
-import in the app.
+Each device's folder is laid out like the Mac's. The sweep turns `carriers/`
+into `warped.*` files in `config/`, and `singbox.sh build` turns all of
+`config/` into profiles in `sing-box/`.
 
 A device with only plain tunnels can use the WireGuard app instead. iOS runs
 one VPN at a time, though, so using a tunnel in that app means leaving
@@ -316,12 +346,18 @@ sing-box.
 
 ### Set up a device
 
-```sh
-~/Documents/code/wireguard-tunnels/scripts/singbox.sh new iphone
-# put its carriers in ~/wg-tunnels/devices/iphone/carriers/
-# and its plain tunnels in ~/wg-tunnels/devices/iphone/config/
-~/Documents/code/wireguard-tunnels/scripts/singbox.sh build iphone
-```
+1. Make the device folder and its own WARP account:
+   ```sh
+   singbox.sh new iphone
+   ```
+2. Put its carriers in `~/wg-tunnels/devices/iphone/carriers/` and its plain
+   tunnels in `~/wg-tunnels/devices/iphone/config/`. Each needs its own key
+   ([Keys](#keys)).
+3. Build its profiles:
+   ```sh
+   singbox.sh build iphone
+   ```
+4. Send a profile to the device ([Getting a profile to the device](#getting-a-profile-to-the-device)).
 
 | In `devices/<device>/` | What |
 |--------|------|
@@ -333,30 +369,32 @@ sing-box.
 Plain configs should be full tunnels (`AllowedIPs` with `0.0.0.0/0`). A
 profile sends all of the device's traffic to the tunnel in use, so a split
 config (a home LAN only, say) leaves the device with nothing past its own
-networks, not even DNS; `build` warns about one.
+networks, not even DNS. `build` warns about one.
 
-`build` skips, and reports, a config it can't use: it needs one `[Peer]`, a
+`build` skips, and reports, a config it can't use. It needs one `[Peer]`, a
 `PrivateKey`, `PublicKey`, `Address` and an `Endpoint` as `host:port`. It also
-skips a `warped.*` file whose carrier is gone from `carriers/` or broken. A few names are
-taken: `tunnel`, `warp`, `composite.<device>` and `carrier.<carrier>`.
+skips a `warped.*` file whose carrier is missing from `carriers/` or broken.
+These tunnel names are reserved: `tunnel`, `warp`, `composite.<device>` and
+`carrier.<carrier>`.
 
 ### Keys
 
-Every config on a device needs its own WireGuard key: one not used by any
-other config, by this Mac, or by another device. Two configs on one key knock
-each other off whenever both are up, and a lost device can be revoked on its
-own. Get one by downloading a new config from your provider or server for
-this device. `build` stops on a key that's used twice, and names the files
-(never the key). A key used twice on one device (a carrier that's a copy of
-a config in `config/`, say) only gets a note: a device runs one tunnel at a
-time, and the composite has no keepalives. The device's warped tunnels all share its one
-WARP key, which is why `new` gives each device its own WARP account.
+Every config on a device needs its own WireGuard key, not used by any other
+config, this Mac, or another device. Two configs on one key knock each other
+off whenever both are up, and a lost device can be revoked on its own. Get one
+by downloading a new config for this device from your provider or server.
+
+`build` stops on a key shared with another device, and names the files
+(never the key). A key used twice on one device (a carrier copied from a
+config in `config/`, say) only gets a note: a device runs one tunnel at a
+time, and the composite has no keepalives. A device's warped tunnels all share
+its one WARP key, which is why `new` gives each device its own WARP account.
 
 ### Which profile to import
 
-A profile is one file you import in the sing-box app; the app runs one profile
-at a time. `build` writes two kinds into `sing-box/`, and owns that folder: a
-`.json` there that it didn't write is removed.
+`build` writes two kinds of profile into `sing-box/`; the app runs one profile
+at a time. `build` owns that folder: a `.json` there that it didn't write is
+removed.
 
 | Profile | What's in it | Switching tunnels |
 |---------|--------------|-------------------|
@@ -364,20 +402,20 @@ at a time. `build` writes two kinds into `sing-box/`, and owns that folder: a
 | `<tunnel>.json` (e.g. `warped.chicago.json`, `home.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
 
 Every device also gets a `warp` tunnel, in the composite and as `warp.json`:
-WARP alone, straight from the network the device is on, with no carrier. It
-uses the device's own WARP account, so it needs no config of its own. Your
-traffic exits through Cloudflare, but the network you're on can see you're
-using WARP; a warped tunnel hides that inside the carrier.
+WARP alone, straight from the device's network, with no carrier. It uses the
+device's own WARP account, so it needs no config. Traffic exits through
+Cloudflare, but the network you're on can see you're using WARP; a warped
+tunnel hides that inside the carrier.
 
 Start with the composite: one import, and you switch tunnels in the picker.
-Use one-tunnel profiles when a server needs to reach the device through an
-idle tunnel (a home server, say), or when one tunnel's small MTU would slow
-the rest. Nothing stops you importing both kinds.
+Use one-tunnel profiles when a server must reach the device through an idle
+tunnel (a home server, say), or when one tunnel's small MTU would slow the
+rest. You can import both kinds.
 
-sing-box starts every tunnel in a profile at once, not just the one picked. So
-the composite leaves out keepalives: each tunnel talks to its server only while
-it carries traffic. Otherwise every tunnel would stay connected, and the
-warped ones, on the device's one WARP key, would knock each other off. The
+sing-box starts every tunnel in a profile at once, not just the one picked.
+So the composite leaves out keepalives: each tunnel talks to its server only
+while it carries traffic. Otherwise every tunnel would stay connected, and the
+warped ones, sharing the device's WARP key, would knock each other off. The
 costs:
 
 - a server can't reach the device through an idle tunnel;
@@ -393,11 +431,13 @@ A one-tunnel profile keeps the config's keepalive and its own MTU.
 2. Open it in the sing-box app, which adds it as a new profile.
 3. Delete the copy you sent: it holds private keys.
 
-**Apple TV.** Give it its own device folder (`singbox.sh new appletv`), so it
-has its own keys. An Apple TV can't receive AirDrop, so send its profile to an
-iPhone, then on the Apple TV choose *Import profile from iPhone/iPad* (as the
-sing-box docs list it). Don't start that profile on the phone: the two would
-share keys.
+**Apple TV**
+
+1. Give it its own device (`singbox.sh new appletv`), so it has its own keys.
+2. An Apple TV can't receive AirDrop, so send its profile to an iPhone.
+3. On the Apple TV, choose *Import profile from iPhone/iPad* (as the sing-box
+   docs list it). Don't start that profile on the phone: the two would share
+   keys.
 
 The app's QR scanner only takes links, not a whole profile, so it won't work
 for these.
@@ -405,26 +445,26 @@ for these.
 ### Updating a device
 
 1. Change `carriers/` or `config/`: add, replace or delete a `.conf`.
-2. Run `singbox.sh build <device>`. It lists each profile as `new`, `updated`,
-   `unchanged`, or removed (its tunnel is gone).
+2. Run `singbox.sh build <device>`. It lists each profile as `new`,
+   `updated`, `unchanged`, or removed (its tunnel is gone).
 3. Send only the `new` and `updated` ones. In the app, delete the old copy and
    import the new one.
 
-A carrier taken out of `carriers/` leaves the profiles, but its
-`warped.<carrier>.conf` stays in `config/` until you delete it.
+A carrier removed from `carriers/` drops out of the profiles on the next
+build, but its `warped.<carrier>.conf` stays in `config/` until you delete it.
 
 ### What build puts in a profile
 
 - A `warped.<carrier>` is WARP detoured through that carrier, at 1280 as on
   the Mac, or the carrier's MTU minus 80 when that's smaller. `warp` is the
-  same WARP endpoint with no carrier, at 1280.
-  Any other config is an endpoint as it stands.
-- DNS goes to 1.1.1.1 through the tunnel in use, whatever a config's own `DNS`
-  line says.
+  same WARP endpoint with no carrier, at 1280. Any other config is an endpoint
+  as it stands.
+- DNS goes to 1.1.1.1 through the tunnel in use, whatever a config's own
+  `DNS` line says.
 - `strict_route` keeps traffic in the VPN. sing-box has no kill switch; this
   is the closest it gets.
-- A server given by hostname is looked up on the network the device is on,
-  since through the tunnel it would need that tunnel up first.
+- A server given by hostname is looked up on the device's own network, since
+  through the tunnel it would need that tunnel up first.
 - A carrier's [extras](#warped-tunnels) are swept as on a Mac, but
   `AllowedIPs` doesn't route in sing-box, so `build` adds a rule sending them
   to the carrier. In the composite the rule applies whichever tunnel is
@@ -435,19 +475,18 @@ A carrier taken out of `carriers/` leaves the profiles, but its
 
 ### sing-box on this Mac
 
-sing-box has a Mac app too, and it can run this Mac's tunnels instead of the
-daemon:
+The sing-box Mac app can run this Mac's tunnels instead of the daemon. Build
+the Mac like any other device, using its device name:
 
 ```sh
-~/Documents/code/wireguard-tunnels/scripts/singbox.sh build mbp-1   # this Mac's device name
+singbox.sh build mbp-1
 ```
 
-The Mac is built like any other device: its sweep (with the WireGuard app
-column, as when you run it yourself), then every tunnel in its `config/` into
-its `sing-box/`, `composite.mbp-1.json` and one profile per tunnel. Import them
-in the sing-box app on the Mac.
+This sweeps its carriers (without the WireGuard app advice), then writes
+`composite.mbp-1.json` and one profile per tunnel into its `sing-box/`.
+Import them in the sing-box app on the Mac.
 
-The profiles use the same keys as the daemon, so run one or the other:
+The profiles use the same keys as the daemon, so run one or the other: run
 `tunnel.sh down` before turning sing-box on, and turn sing-box off before
 `tunnel.sh up`.
 
@@ -455,12 +494,14 @@ What you give up while sing-box runs instead of the daemon:
 
 - **The kill switch.** `strict_route` keeps traffic in the VPN while sing-box
   runs; if the app quits, traffic goes out directly.
-- **The menu bar lock** and the `tunnel.sh` commands: they only see the daemon.
+- **The menu bar lock** and the `tunnel.sh` commands: they only see the
+  daemon.
 
 ## Menu bar (optional)
 
-`install.sh --swiftbar` adds a lock to the menu bar through
-[SwiftBar](https://github.com/swiftbar/SwiftBar):
+`install.sh --swiftbar` adds a lock icon to the menu bar, through
+[SwiftBar](https://github.com/swiftbar/SwiftBar), showing whether you're
+protected:
 
 | Lock | Meaning |
 |------|---------|
@@ -468,20 +509,26 @@ What you give up while sing-box runs instead of the daemon:
 | orange, locked | A tunnel is wanted but not up: the kill switch is blocking traffic |
 | grey, open | No VPN |
 
-The menu shows the tunnel, the exit and real IPs with their city, handshakes
-and Tx/Rx, and has Status, Reconnect, Disconnect, Breakglass and every
-imported tunnel to switch to; More has the status in Terminal, the log,
-Rotate WARP Keys and Update Daemon (`tunnel.sh update`; it says "out of date"
-when the repo's `tunnel.sh` differs from the daemon's copy). These run in the background and ask for your
-password in a dialog (`askpass.sh`). The exit and real IPs come from
-[ipinfo.io](https://ipinfo.io).
+The menu shows the tunnel, its uptime, the exit and real IPs with their city
+(from [ipinfo.io](https://ipinfo.io)), handshakes, the kill switch, and
+Tx/Rx. It has:
+
+- **Status**, **Reconnect**, **Disconnect** and **Breakglass**.
+- Every imported tunnel, to switch to.
+- **More**: status in Terminal, the log, Rotate WARP Keys, and Update Daemon
+  (`tunnel.sh update`; it says "out of date" when the repo's `tunnel.sh`
+  differs from the daemon's copy).
+
+Actions outside Terminal run in the background, ask for your password in a
+dialog when they need `sudo` (`askpass.sh`), and report the result as a
+notification.
 
 What it installs:
 
 - SwiftBar, if `/Applications/SwiftBar.app` is missing.
 - Its plugin folder, if none is set: `~/.config/swiftbar`.
-- The plugin: a symlink to `scripts/swiftbar/tunnel-status.5s.sh`, so a `git pull`
-  updates it.
+- The plugin: a symlink to `scripts/swiftbar/tunnel-status.5s.sh`, so a
+  `git pull` updates it.
 - `~/Library/LaunchAgents/com.local.swiftbar.plist`, which starts SwiftBar at
   login and again if it crashes or is killed. Skipped when another LaunchAgent
   already runs SwiftBar. If SwiftBar is also a Login Item, remove it there, or
@@ -489,17 +536,20 @@ What it installs:
 
 ## Troubleshooting
 
-- **What's going on?** `tunnel.sh status`, then `tunnel.sh log` (the daemon's
-  log, `/var/log/wg-tunnels.log`).
-- **No network, even after `down`?** `tunnel.sh breakglass` trusts no saved
-  state: it stops WireGuard app tunnels, the daemon, `wg-quick` and
+Start here when a tunnel or the network misbehaves.
+
+- **What's going on?** Run `tunnel.sh status`, then `tunnel.sh log` (the
+  daemon's log, `/var/log/wg-tunnels.log`).
+- **No network, even after `down`?** Run `tunnel.sh breakglass`. It trusts no
+  saved state: it stops WireGuard app tunnels, the daemon, `wg-quick` and
   `wireguard-go`; removes every route of ours and any reject route; resets
-  tunnel DNS left on network services to DHCP; and power cycles Wi-Fi if it has
-  no address. It runs from the repo, so it works even if the daemon is broken.
+  tunnel DNS left on network services to DHCP; and power cycles Wi-Fi if it
+  has no address. It runs from the repo, so it works even if the daemon is
+  broken.
 - **Also using the WireGuard app?** That's fine, with two rules. Turn off On
   Demand for its tunnels: it reconnects behind `up` and breaks the tunnel, so
-  `up` refuses while it's on. And switch an app tunnel on only after `down`:
-  the kill switch would swallow its traffic. `up` stops app tunnels for you.
+  `up` refuses while it's on. And switch an app tunnel on only after `down`,
+  or the kill switch swallows its traffic. `up` stops app tunnels for you.
 - **A script stops about the old layout?** Folders used to be
   `~/wg-tunnels/local/` (this Mac) and `~/wg-tunnels/sing-box/<device>/`, with
   `profiles/` inside; earlier still, this Mac's sat in `~/wg-tunnels` itself.
@@ -508,12 +558,14 @@ What it installs:
 
 ## How it works
 
+What the daemon does, for debugging or curiosity.
+
 `tunnel.sh` is both the command and, installed as `/usr/local/sbin/wg-tunnels`,
 the root daemon. `import` copies each config to
-`$(brew --prefix)/etc/wg-tunnels` (root-owned, interfaces named `wtN`). Endpoint
-hostnames are resolved there, since DNS can be cut off while switching. `up`
-and `down` record what's wanted and wake the daemon, which does the work and
-reports progress back to the waiting command.
+`$(brew --prefix)/etc/wg-tunnels` (root-owned, interfaces named `wtN`) and
+resolves endpoint hostnames there, since DNS can be cut off while switching.
+`up` and `down` record what's wanted and wake the daemon, which does the work
+and reports progress back to the waiting command.
 
 Routing while a full or warped tunnel is up (macOS uses the most specific
 route):
@@ -527,12 +579,12 @@ route):
 | `0/1 128/1`, `::/1 8000::/1` | reject: the **kill switch**, nothing leaves outside a tunnel |
 | LAN, default | unchanged |
 
-The daemon brings back the last `up` after a reboot and checks every 30s: it
-re-pins the server when the gateway changes or the pinned route is gone, gives
-the exit (WARP, or the tunnel itself when it has a `PersistentKeepalive`) a new
-source port when it stops handshaking (then restarts it), and restarts anything
-that died. Every 5s it also looks for a network change (Wi-Fi rejoined, a new
-gateway) and runs those checks straight away, so a tunnel recovers in seconds.
+The daemon brings back the last `up` after a reboot and checks every 30s. It
+re-pins the server when the gateway changes or the pinned route is gone. When
+the exit (WARP, or the tunnel itself if it has a `PersistentKeepalive`) stops
+handshaking, it gives it a new source port, then restarts it. It also restarts
+anything that died. Every 5s it looks for a network change (Wi-Fi rejoined, a
+new gateway) and runs those checks at once, so a tunnel recovers in seconds.
 
 ### Files
 
@@ -551,11 +603,13 @@ your Mac; nothing here sends them anywhere.
 
 ## Uninstall
 
+These commands remove the daemon, its files and, if you choose, your configs.
+
 ```sh
-~/Documents/code/wireguard-tunnels/scripts/tunnel.sh uninstall   # tunnels down, daemon removed
+tunnel.sh uninstall                                       # tunnels down, daemon removed
 sudo rm -rf "$(brew --prefix)/etc/wg-tunnels"            # the daemon's config copies
 rm -f "$(brew --prefix)/etc/wireguard/warp.conf"
-rm -rf ~/wg-tunnels                                      # your configs and WARP account: keep a copy if you need them
+rm -rf ~/wg-tunnels                                      # your configs and WARP accounts: keep a copy if you need them
 ```
 
 With the menu bar:
