@@ -156,7 +156,7 @@ configs name the device (wireguard-tools' `dengar.mbp-1.conf` belongs in
 | Folder | What goes there | Used by |
 |--------|-----------------|---------|
 | `carriers/` | Carrier configs, as downloaded from your provider or server: each becomes a [warped tunnel](#warped-tunnels), `config/warped.<name>.<device>.conf` | both |
-| `config/` | Every tunnel, one `.conf` each; the file name is the tunnel name. Plain configs go here as they are; the `warped.*` files are written for you | both |
+| `config/` | Every tunnel, one `.conf` each; the file name is the tunnel name. Plain configs go here as they are; the `warped.*` files and `warp.<device>.conf` are written for you | both |
 | `warp/` | The device's own WARP account (`wgcf-account.toml`, `wgcf-profile.conf`) | both |
 | `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*, if you keep tunnels there ([extract](#tunnelsh)) | Local Mac Tunnels |
 | `sing-box/` | The sing-box profiles built from `config/`, to import in the app | Sing-Box Device Tunnels |
@@ -194,6 +194,14 @@ folder's) always goes last. If the carrier's name already has it elsewhere,
 as a word of its own between `.`, `_` or `-`, it's moved there:
 `carriers/proton.chicago_iphone-US-IL-802.conf` becomes
 `warped.proton.chicago-US-IL-802.iphone`.
+
+**WARP alone, for the WireGuard app.** The sweep also writes
+`config/warp.<device>.conf`: the device's WARP account from `warp/`, with no
+carrier, on the same [endpoint](#warp-endpoint) as the warped tunnels. Import
+it in the WireGuard app to run WARP there instead of in sing-box. Neither
+setup imports it: this Mac's daemon already runs that WARP as its own, and
+`build` makes `warp.<device>` from `warp/` directly. `singbox.sh new` runs the sweep
+too, so a new device has its `warp.<device>.conf` right away.
 
 **Edit the carrier, not the warped file.** Every sweep writes the warped file
 again from its carrier (only when it changes). `x.conf`, `warped.x.conf` and

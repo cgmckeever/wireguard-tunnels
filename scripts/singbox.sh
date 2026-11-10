@@ -15,8 +15,10 @@
 #   carriers/   the device's own WireGuard configs to carry WARP, made for this
 #               device (a key shared with another device makes both drop)
 #   warp/       the device's own wgcf WARP account and profile (same reason)
-#   config/     every tunnel on the device: warped.<carrier>.<device>.conf (from the
-#               sweep), and plain configs you put there, used as they are
+#   config/     every tunnel on the device: warped.<carrier>.<device>.conf and
+#               warp.<device>.conf (from the sweep; build skips the latter, it
+#               makes warp.<device> from warp/), and plain configs you put
+#               there, used as they are
 #   sing-box/   what build writes, to import in the device's sing-box app:
 #                 <device>.json             the composite: every tunnel,
 #                                           picked in the app
@@ -85,6 +87,10 @@ cmd_new() {
     chmod 600 "$dir/warp/wgcf-account.toml"
     [ -f "$dir/warp/wgcf-profile.conf" ] || quiet_wgcf "$dir/warp" generate
     chmod 600 "$dir/warp/wgcf-profile.conf"
+    # The sweep writes config/warp.<device>.conf (WARP alone, for the
+    # WireGuard app) now, for a device that never runs build
+    SWEEP_FOR_SINGBOX=1 "$HERE/wgwarp-sweep.sh" "$dir" > /dev/null || die "sweep failed"
+    echo "WireGuard app config: ${dir}/config/warp.$1.conf (WARP alone)"
     echo
     echo "Next: put this device's carriers in ${dir}/carriers/ and its plain tunnels"
     echo "      in ${dir}/config/ (new WireGuard configs made for this device)"
@@ -418,7 +424,9 @@ cmd_build() {
     # Warped first: the composite's default (first) tunnel is a warped one when there is one
     files=("$dir"/config/warped.*.conf)
     for conf in "$dir"/config/*.conf; do
-        case "$(basename "$conf")" in warped.*) ;; *) files+=("$conf") ;; esac
+        # warp.<device>.conf is the sweep's copy of warp/, for the WireGuard
+        # app: add_warp makes that tunnel from warp/ itself
+        case "$(basename "$conf")" in warped.*|"warp.$name.conf") ;; *) files+=("$conf") ;; esac
     done
     for conf in "${files[@]}"; do
         tag=$(basename "$conf" .conf)

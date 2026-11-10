@@ -8,6 +8,9 @@
 #   wgwarp-sweep.sh <device>    ~/wg-tunnels/devices/<device> (singbox.sh build runs this)
 #   wgwarp-sweep.sh <dir>       any folder with carriers/ in it
 #
+# Also writes config/warp.<device>.conf: the device's WARP alone (from warp/),
+# for the WireGuard app.
+#
 # Reads every carriers/<name>.conf (as downloaded from the provider) and writes
 # config/warped.<name>.<device>.conf: AllowedIPs set to the WARP endpoint (plus
 # the extras below), the DNS line removed and a keepalive, so the tunnel
@@ -182,6 +185,15 @@ app_action() {
     fi
 }
 
+# place <tmp> <out>: move tmp into place unless out already says the same;
+# prints new, updated or unchanged
+place() {
+    if [ -f "$2" ] && cmp -s "$1" "$2"; then rm -f "$1"; echo unchanged; return; fi
+    local state=new; [ -f "$2" ] && state=updated
+    mv "$1" "$2" || { rm -f "$1"; die "can't write $2"; }
+    echo "$state"
+}
+
 row()  { printf '%-40s %-10s %s\n' "$@"; }
 note() { printf '%-40s %s\n' "" "└ $*"; }
 list() { paste -sd, - | sed 's/,/, /g'; }
@@ -210,13 +222,7 @@ for raw in "${raws[@]}"; do
 
     tmp=$(mktemp "$CONFIG_DIR/.render.XXXXXX") || die "mktemp failed in $CONFIG_DIR"
     render "$raw" > "$tmp" || { rm -f "$tmp"; die "can't render $raw"; }
-    if [ -f "$out" ] && cmp -s "$tmp" "$out"; then
-        rm -f "$tmp"
-        state="unchanged"
-    else
-        [ -f "$out" ] && state="updated" || state="new"
-        mv "$tmp" "$out" || { rm -f "$tmp"; die "can't write $out"; }
-    fi
+    state=$(place "$tmp" "$out") || exit 1
 
     row "$name" "$state" "$(app_action "$name" "$(endpoint_of "$out")" "$state")"
     e=$(extras_of "$raw" kept | list); [ -n "$e" ] && note "also carries ${e}"
@@ -229,6 +235,19 @@ for raw in "${raws[@]}"; do
         note "carrier MTU ${mtu}: WARP runs at $((mtu - 80)) inside (IPv6 and QUIC fall back)"
     fi
 done
+
+# warp.<device>: the device's WARP alone (no carrier), as a plain config for
+# the WireGuard app, on the same endpoint as the warped tunnels. tunnel.sh
+# import and singbox.sh build skip it: each makes its own from warp/.
+if [ -f "$DIR/warp/wgcf-profile.conf" ]; then
+    name="warp.$DEVICE"; out="$CONFIG_DIR/$name.conf"
+    names+="$name "
+    tmp=$(mktemp "$CONFIG_DIR/.render.XXXXXX") || die "mktemp failed in $CONFIG_DIR"
+    sed -E "s/^([[:space:]]*[Ee][Nn][Dd][Pp][Oo][Ii][Nn][Tt][[:space:]]*=[[:space:]]*).*/\1$WARP_ENDPOINT/" \
+        "$DIR/warp/wgcf-profile.conf" > "$tmp" || { rm -f "$tmp"; die "can't render $DIR/warp/wgcf-profile.conf"; }
+    state=$(place "$tmp" "$out") || exit 1
+    row "$name" "$state" "(WARP alone, for the WireGuard app)"
+fi
 
 # config/ files no carrier claims: one carrying only the WARP endpoint (plus
 # extras) was swept and lost its carrier (an orphan: reported, never deleted);

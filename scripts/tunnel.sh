@@ -323,6 +323,11 @@ cmd_import_root() {
             printf '%-28s %-7s %-6s %s\n' "$name" - - "skipped: not a WireGuard config"
             continue
         fi
+        # The sweep's warp.<device>.conf: this Mac's WARP, already run as (WARP)
+        if [ "$(conf_val "$f" PrivateKey)" = "$(conf_val "$WARP_SRC" PrivateKey)" ]; then
+            printf '%-28s %-7s %-6s %s\n' "$name" - - "skipped: this Mac's WARP key, run as (WARP)"
+            continue
+        fi
         kind=$(kind_of "$name" "$f")
         if [ "$kind" = warped ] && ! why=$(swept_ok "$f" "$wep"); then
             printf '%-28s %-7s %-6s %s\n' "$name" "$kind" - "skipped: ${why} (not as the sweep writes it: is its carrier in carriers/?)"
