@@ -482,9 +482,9 @@ device yet, or another one? `singbox.sh new <device>` first):
 
 | Profile | What's in it | Switching tunnels |
 |---------|--------------|-------------------|
-| `<device>.json` (the composite) | Every tunnel (warped ones first, `warp` last) | In the app's picker, without dropping the VPN |
+| `<device>.json` (the composite) | Every tunnel (warped ones first, `warp.<device>` last) | In the app's picker, without dropping the VPN |
 | `<group>.list.<device>.json` | One group of tunnels (below) | In the picker, as in the composite |
-| `<tunnel>.json` (e.g. `warped.proton.chicago.iphone.json`, `dengar.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
+| `<tunnel>.json` (e.g. `warped.proton.chicago.iphone.json`, `dengar.iphone.json`, `warp.iphone.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
 
 A group is every tunnel whose name starts with the same first word (in any
 case), the server it goes to: `<server>.list.<device>.json`.
@@ -493,7 +493,7 @@ case), the server it goes to: `<server>.list.<device>.json`.
 |---------------|---------------|
 | `dengar.list.iphone.json` | `dengar.chicago.iphone`, `dengar.warped.chicago.iphone` |
 | `proton.list.iphone.json` | `proton.chicago`, `proton.toronto` (provider configs used directly) |
-| `warped.list.iphone.json` | Every `warped.*` tunnel, whatever carries it, and `warp` |
+| `warped.list.iphone.json` | Every `warped.*` tunnel, whatever carries it, and `warp.iphone` |
 
 A group is only written when it has two or more tunnels, even if it ends up
 holding the same tunnels as the composite. So name every config
@@ -502,7 +502,7 @@ holding the same tunnels as the composite. So name every config
 readable names, though their warped tunnels all group under `warped`:
 `carriers/proton.chicago.conf` gives `warped.proton.chicago.iphone`.
 
-Every device also gets a `warp` tunnel, as `warp.json`, in the composite, and
+Every device also gets a `warp.<device>` tunnel, as `warp.<device>.json`, in the composite, and
 in `warped.list.<device>.json` when it has a warped tunnel to join:
 WARP alone, straight from the device's network, with no carrier. It uses the
 device's own WARP account, so it needs no config of its own. Traffic exits
@@ -582,14 +582,14 @@ files (never the key); see [Keys](#keys). A key used twice on one device (a
 carrier copied from a config in `config/`, say) only gets a note: a device
 runs one tunnel at a time.
 
-**Names.** These tunnel names are reserved: `tunnel`, `warp`,
+**Names.** These tunnel names are reserved: `tunnel`, `warp.<device>`,
 `<device>` (the composite), `<group>.list.<device>` and `carrier.<carrier>`.
 
 **Profiles.**
 
 - A `warped.<carrier>` is WARP detoured through that carrier, at 1280, or the
   carrier's MTU minus 80 when that's smaller
-  ([Small carrier MTU](#small-carrier-mtu)). `warp` is the same WARP endpoint
+  ([Small carrier MTU](#small-carrier-mtu)). `warp.<device>` is the same WARP endpoint
   with no carrier, at 1280. Any other config is an endpoint as it stands.
 - DNS goes to 1.1.1.1 through the tunnel in use, whatever a config's own
   `DNS` line says.

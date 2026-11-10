@@ -22,10 +22,10 @@
 #                                           picked in the app
 #                 <server>.list.<device>.json  one server's tunnels, from the
 #                                           first word of their names (dengar.*,
-#                                           proton.*; warped.* and warp go in
+#                                           proton.*; warped.* and warp.* go in
 #                                           warped.list; groups of 2+ only)
 #                 <tunnel>.json             one tunnel each
-#                 warp.json                 WARP alone, no carrier (in the
+#                 warp.<device>.json        WARP alone, no carrier (in the
 #                                           composite and warped.list too)
 #               build owns this folder: a .json it didn't write is removed
 #
@@ -58,7 +58,6 @@ device_dir() {
     [ -n "$1" ] || die "a device name, please (singbox.sh $2 <device>)"
     [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] \
         || die "device names are letters, digits, . _ - (not starting with .)"
-    [ "$1" != warp ] || die "a device can't be named warp: warp.json is the WARP-only profile"
     echo "$TUNNELS_DIR/$1"
 }
 
@@ -237,13 +236,13 @@ warp_mtu() {
     echo "$mtu"
 }
 
-# add_warp <WARP profile>: WARP alone, straight from the device's network (no
-# carrier): the device's own WARP account, at its MTU
+# add_warp <WARP profile> <device>: warp.<device>, WARP alone, straight from
+# the device's network (no carrier): the device's own WARP account, at its MTU
 add_warp() {
     local mtu eps
     mtu=$(warp_mtu "$1")
-    eps=$(warp_json "$1" warp "" "$mtu" | jq -sc .) || die "can't read $1"
-    unit_add warp "$eps" '[]' "$mtu"
+    eps=$(warp_json "$1" "warp.$2" "" "$mtu" | jq -sc .) || die "can't read $1"
+    unit_add "warp.$2" "$eps" '[]' "$mtu"
 }
 
 # --- checks before writing ---
@@ -285,12 +284,12 @@ $self" >&2
 }
 
 # check_tags <device>: endpoint names are unique ("tunnel" is the picker's,
-# "warp" the WARP-only tunnel's, carrier.<name> a warped tunnel's carrier),
+# warp.<device> the WARP-only tunnel's, carrier.<name> a warped tunnel's carrier),
 # and no tunnel is named like the composite or a group profile
 check_tags() {
     local dup
     dup=$( { printf '%s\n' "${unit_eps[@]}" | jq -r '.[].tag'; echo tunnel; } | sort | uniq -d | paste -sd' ' -)
-    [ -z "$dup" ] || die "more than one tunnel would be named: $dup (rename the config; \"tunnel\", \"warp\" and \"carrier.<name>\" are taken)"
+    [ -z "$dup" ] || die "more than one tunnel would be named: $dup (rename the config; \"tunnel\", \"warp.$1\" and \"carrier.<name>\" are taken)"
     case " ${tags[*]} " in
         *" $1 "*) die "a tunnel can't be named $1: $1.json is the composite (rename the config)" ;;
     esac
@@ -353,14 +352,14 @@ commit_profiles() {
             state=new; [ -f "$out" ] && state=updated
             mv "$tmp" "$out" || die "can't write $out (the profiles listed above were already replaced)"
         fi
-        printf '%-44s %s\n' "$(basename "$out")" "$state"
+        printf '%-48s %s\n' "$(basename "$out")" "$state"
     done
     STAGED_TMP=() STAGED_OUT=()
 }
 
 # group_key <tag>: the group profile a tunnel also goes in, from the first
-# word of its name, e.g. dengar.chicago.iphone in dengar's; warp (WARP alone)
-# goes with the warped tunnels
+# word of its name, e.g. dengar.chicago.iphone in dengar's; warp.<device>
+# (WARP alone) goes with the warped tunnels
 group_key() {
     local k
     k=$(printf '%s' "${1%%.*}" | tr '[:upper:]' '[:lower:]')
@@ -437,7 +436,7 @@ cmd_build() {
         used+=("$conf")
     done
     [ ${#tags[@]} -gt 0 ] || die "nothing to build: put configs in $dir/carriers or $dir/config"
-    add_warp "$profile"
+    add_warp "$profile" "$name"
     check_keys "$dir" "${used[@]}" "$profile"
     check_tags "$name"
 
@@ -476,7 +475,7 @@ cmd_build() {
     # Profiles no longer built (a tunnel or a group gone)
     for out in "$dir"/sing-box/*.json; do
         case "$written" in *" $(basename "$out") "*) continue ;; esac
-        rm -f "$out" && printf '%-44s %s\n' "$(basename "$out")" "removed (no longer built)"
+        rm -f "$out" && printf '%-48s %s\n' "$(basename "$out")" "removed (no longer built)"
     done
     command -v sing-box >/dev/null || echo "(not checked: sing-box isn't installed on this Mac)"
 
