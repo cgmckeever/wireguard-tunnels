@@ -155,7 +155,7 @@ configs name the device (wireguard-tools' `dengar.mbp-1.conf` belongs in
 
 | Folder | What goes there | Used by |
 |--------|-----------------|---------|
-| `carriers/` | Carrier configs, as downloaded from your provider or server: each becomes a [warped tunnel](#warped-tunnels), `config/warped.<name>.conf` | both |
+| `carriers/` | Carrier configs, as downloaded from your provider or server: each becomes a [warped tunnel](#warped-tunnels), `config/warped.<name>.<device>.conf` | both |
 | `config/` | Every tunnel, one `.conf` each; the file name is the tunnel name. Plain configs go here as they are; the `warped.*` files are written for you | both |
 | `warp/` | The device's own WARP account (`wgcf-account.toml`, `wgcf-profile.conf`) | both |
 | `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*, if you keep tunnels there ([extract](#tunnelsh)) | Local Mac Tunnels |
@@ -185,15 +185,19 @@ tunnels; this step is called the *sweep*. How each setup runs it is in its own
 section ([Local Mac Tunnels](#warped-tunnels-on-this-mac),
 [Sing-Box Device Tunnels](#what-build-accepts-and-writes)).
 
-**What the sweep writes.** `carriers/proton.chicago.conf` becomes
-`config/warped.proton.chicago.conf`, with `AllowedIPs` set to the WARP endpoint
+**What the sweep writes.** On the `iphone` device, `carriers/proton.chicago.conf`
+becomes `config/warped.proton.chicago.iphone.conf`, with `AllowedIPs` set to the WARP endpoint
 (plus [extras](#extras)), the `DNS` line removed, and
 `PersistentKeepalive = 25`, so the carrier carries WARP and nothing else. The
-`warped.` prefix is what marks a tunnel as warped.
+`warped.` prefix is what marks a tunnel as warped. The device's name (its
+folder's) always goes last. If the carrier's name already has it elsewhere,
+as a word of its own between `.`, `_` or `-`, it's moved there:
+`carriers/proton.chicago_iphone-US-IL-802.conf` becomes
+`warped.proton.chicago-US-IL-802.iphone`.
 
 **Edit the carrier, not the warped file.** Every sweep writes the warped file
 again from its carrier (only when it changes). `x.conf`, `warped.x.conf` and
-`warped-x.conf` in `carriers/` all become `warped.x`, so keep only one: if
+`warped-x.conf` in `carriers/` all become `warped.x.<device>`, so keep only one: if
 there are several, one is used and the rest are reported as skipped. A carrier
 that isn't a one-peer WireGuard config is skipped too. Other files in
 `config/` are left alone: a
@@ -479,27 +483,27 @@ device yet, or another one? `singbox.sh new <device>` first):
 | Profile | What's in it | Switching tunnels |
 |---------|--------------|-------------------|
 | `<device>.json` (the composite) | Every tunnel (warped ones first, `warp` last) | In the app's picker, without dropping the VPN |
-| `<group>.all.<device>.json` | One group of tunnels (below) | In the picker, as in the composite |
-| `<tunnel>.json` (e.g. `warped.proton.chicago.json`, `dengar.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
+| `<group>.list.<device>.json` | One group of tunnels (below) | In the picker, as in the composite |
+| `<tunnel>.json` (e.g. `warped.proton.chicago.iphone.json`, `dengar.iphone.json`, `warp.json`) | One tunnel | By starting another profile: the VPN drops for a moment |
 
 A group is every tunnel whose name starts with the same first word (in any
-case), the server it goes to: `<server>.all.<device>.json`.
+case), the server it goes to: `<server>.list.<device>.json`.
 
 | Group profile | Tunnels in it |
 |---------------|---------------|
-| `dengar.all.iphone.json` | `dengar.chicago.iphone`, `dengar.warped.chicago.iphone` |
-| `proton.all.iphone.json` | `proton.chicago`, `proton.toronto` (provider configs used directly) |
-| `warped.all.iphone.json` | Every `warped.*` tunnel, whatever carries it, and `warp` |
+| `dengar.list.iphone.json` | `dengar.chicago.iphone`, `dengar.warped.chicago.iphone` |
+| `proton.list.iphone.json` | `proton.chicago`, `proton.toronto` (provider configs used directly) |
+| `warped.list.iphone.json` | Every `warped.*` tunnel, whatever carries it, and `warp` |
 
 A group is only written when it has two or more tunnels, even if it ends up
 holding the same tunnels as the composite. So name every config
 `<server>.<name>.conf`: `proton.chicago.conf`, not `chicago.conf`
 (wireguard-tools' names already are). Carriers follow the same rule for
 readable names, though their warped tunnels all group under `warped`:
-`carriers/proton.chicago.conf` gives `warped.proton.chicago`.
+`carriers/proton.chicago.conf` gives `warped.proton.chicago.iphone`.
 
 Every device also gets a `warp` tunnel, as `warp.json`, in the composite, and
-in `warped.all.<device>.json` when it has a warped tunnel to join:
+in `warped.list.<device>.json` when it has a warped tunnel to join:
 WARP alone, straight from the device's network, with no carrier. It uses the
 device's own WARP account, so it needs no config of its own. Traffic exits
 through Cloudflare, but the network you're on can see you're using WARP; a
@@ -556,7 +560,7 @@ for these.
    and import the new one; an import adds a profile, it doesn't replace one.
 
 A carrier removed from `carriers/` drops out of the profiles on the next
-build, but its `warped.<carrier>.conf` stays in `config/` until you delete it.
+build, but its `warped.<carrier>.<device>.conf` stays in `config/` until you delete it.
 
 ### What build accepts and writes
 
@@ -579,7 +583,7 @@ carrier copied from a config in `config/`, say) only gets a note: a device
 runs one tunnel at a time.
 
 **Names.** These tunnel names are reserved: `tunnel`, `warp`,
-`<device>` (the composite), `<group>.all.<device>` and `carrier.<carrier>`.
+`<device>` (the composite), `<group>.list.<device>` and `carrier.<carrier>`.
 
 **Profiles.**
 

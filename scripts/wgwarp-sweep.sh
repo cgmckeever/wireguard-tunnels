@@ -9,11 +9,12 @@
 #   wgwarp-sweep.sh <dir>       any folder with carriers/ in it
 #
 # Reads every carriers/<name>.conf (as downloaded from the provider) and writes
-# config/warped.<name>.conf: AllowedIPs set to the WARP endpoint (plus the
-# extras below), the DNS line removed and a keepalive, so the tunnel carries
-# WARP and nothing else. A carrier already named warped.x or warped-x becomes
-# warped.x, not warped.warped.x. A config/ file is only rewritten when the new
-# one differs.
+# config/warped.<name>.<device>.conf: AllowedIPs set to the WARP endpoint (plus
+# the extras below), the DNS line removed and a keepalive, so the tunnel
+# carries WARP and nothing else. The device (the folder's name) always goes
+# last: one elsewhere in <name> is moved there. A carrier already named warped.x or
+# warped-x becomes warped.x.<device>, not warped.warped.x.<device>. A config/
+# file is only rewritten when the new one differs.
 #
 # Everything WARP-specific about a carrier is done here; tunnel.sh import and
 # singbox.sh build only check it. The warped. prefix is how they know a tunnel
@@ -53,6 +54,7 @@ esac
 APP=""
 [ -z "$SWEEP_FOR_SINGBOX" ] && [ -n "$MAC" ] && [ -d "$TUNNELS/$MAC" ] \
     && [ "$(cd "$DIR" && pwd -P)" = "$(cd "$TUNNELS/$MAC" && pwd -P)" ] && APP=1
+DEVICE=$(basename "$(cd "$DIR" && pwd)")      # always last in warped names
 CARRIER_DIR="$DIR/carriers"
 CONFIG_DIR="$DIR/config"
 # The WARP endpoint: ~/wg-tunnels/.warp-endpoint (one line, IPv4:port), else
@@ -68,9 +70,22 @@ umask 077
 mkdir -p "$CONFIG_DIR" || die "can't create $CONFIG_DIR"
 chmod 700 "$DIR" "$CARRIER_DIR" "$CONFIG_DIR"
 
-# warped_name <carrier file>: the tunnel it becomes (x.conf, warped.x.conf and
-# warped-x.conf all become warped.x). singbox.sh has the same one-liner.
-warped_name() { echo "warped.$(basename "$1" .conf | sed -E 's/^warped[.-]//')"; }
+# warped_name <carrier file> <device>: the tunnel it becomes, the device always
+# last: x.conf, warped.x.conf and warped-x.conf all become warped.x.<device>,
+# and a device elsewhere in the name, as a word of its own (between . _ - or
+# the ends), moves to the end (x_<device>-y becomes warped.x-y.<device>).
+# singbox.sh has the same function.
+warped_name() {
+    local n d="$2" re
+    n=$(basename "$1" .conf | sed -E 's/^warped[.-]//')
+    re="^(.*)([._-])$d([._-].*)$"
+    while [[ "$n" =~ $re ]]; do n="${BASH_REMATCH[1]}${BASH_REMATCH[3]}"; done
+    re="^$d[._-](.*)$"
+    [[ "$n" =~ $re ]] && n="${BASH_REMATCH[1]}"
+    re="(^|[._-])$d$"
+    [[ "$n" =~ $re ]] || n+=".$d"
+    echo "warped.$n"
+}
 
 # valid <conf>: a one-peer client config with a key and an endpoint (keys in
 # any case, as wg-quick and tunnel.sh read them)
@@ -167,21 +182,21 @@ app_action() {
     fi
 }
 
-row()  { printf '%-28s %-10s %s\n' "$@"; }
-note() { printf '%-28s %s\n' "" "└ $*"; }
+row()  { printf '%-40s %-10s %s\n' "$@"; }
+note() { printf '%-40s %s\n' "" "└ $*"; }
 list() { paste -sd, - | sed 's/,/, /g'; }
 
 shopt -s nullglob
 raws=("$CARRIER_DIR"/*.conf)
 if [ ${#raws[@]} -eq 0 ]; then
-    echo "No configs in ${CARRIER_DIR}: put WireGuard configs there (x.conf becomes warped.x)"
+    echo "No configs in ${CARRIER_DIR}: put WireGuard configs there (x.conf becomes warped.x.$DEVICE)"
     echo
 fi
 
 row "TUNNEL" "FILE" "$([ -n "$APP" ] && echo "WIREGUARD APP (only if you use it)")"
 names=" "                       # every warped name a carrier claims
 for raw in "${raws[@]}"; do
-    name=$(warped_name "$raw")
+    name=$(warped_name "$raw" "$DEVICE")
     out="$CONFIG_DIR/${name}.conf"
     # Checked first: a broken carrier doesn't take the name from a good one
     if ! valid "$raw"; then

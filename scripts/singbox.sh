@@ -15,18 +15,18 @@
 #   carriers/   the device's own WireGuard configs to carry WARP, made for this
 #               device (a key shared with another device makes both drop)
 #   warp/       the device's own wgcf WARP account and profile (same reason)
-#   config/     every tunnel on the device: warped.<carrier>.conf (from the
+#   config/     every tunnel on the device: warped.<carrier>.<device>.conf (from the
 #               sweep), and plain configs you put there, used as they are
 #   sing-box/   what build writes, to import in the device's sing-box app:
 #                 <device>.json             the composite: every tunnel,
 #                                           picked in the app
-#                 <server>.all.<device>.json  one server's tunnels, from the
+#                 <server>.list.<device>.json  one server's tunnels, from the
 #                                           first word of their names (dengar.*,
 #                                           proton.*; warped.* and warp go in
-#                                           warped.all; groups of 2+ only)
+#                                           warped.list; groups of 2+ only)
 #                 <tunnel>.json             one tunnel each
 #                 warp.json                 WARP alone, no carrier (in the
-#                                           composite and warped.all too)
+#                                           composite and warped.list too)
 #               build owns this folder: a .json it didn't write is removed
 #
 # This Mac is a device too (its folder is the one in devices/.default,
@@ -129,9 +129,20 @@ unusable() {
     [ -z "$mtu" ] || [[ "$mtu" =~ ^[0-9]+$ ]] || echo "MTU isn't a number"
 }
 
-# warped_name <carrier file>: the tunnel the sweep makes of it (the sweep has
-# the same one-liner)
-warped_name() { echo "warped.$(basename "$1" .conf | sed -E 's/^warped[.-]//')"; }
+# warped_name <carrier file> <device>: the tunnel the sweep makes of it,
+# warped.<name>.<device>, the device moved to the end if it's elsewhere in the
+# name (the sweep has the same function)
+warped_name() {
+    local n d="$2" re
+    n=$(basename "$1" .conf | sed -E 's/^warped[.-]//')
+    re="^(.*)([._-])$d([._-].*)$"
+    while [[ "$n" =~ $re ]]; do n="${BASH_REMATCH[1]}${BASH_REMATCH[3]}"; done
+    re="^$d[._-](.*)$"
+    [[ "$n" =~ $re ]] && n="${BASH_REMATCH[1]}"
+    re="(^|[._-])$d$"
+    [[ "$n" =~ $re ]] || n+=".$d"
+    echo "warped.$n"
+}
 
 # --- sing-box JSON. Private keys go to jq in its environment, never its
 # arguments: any user on the Mac can read another's arguments in ps. ---
@@ -285,7 +296,7 @@ check_tags() {
     esac
     local t
     for t in "${tags[@]}"; do
-        case "$t" in *.all."$1") die "a tunnel can't be named $t: <name>.all.$1 is a group profile (rename the config)" ;; esac
+        case "$t" in *.list."$1") die "a tunnel can't be named $t: <name>.list.$1 is a group profile (rename the config)" ;; esac
     done
 }
 
@@ -403,7 +414,7 @@ cmd_build() {
     # Only carriers build could use: a broken one (the sweep skipped it) leaves
     # its old warped.*.conf without a carrier, so it isn't built from that
     for conf in "$dir"/carriers/*.conf; do
-        [ -z "$(unusable "$conf")" ] && carrier_names+="$(warped_name "$conf") "
+        [ -z "$(unusable "$conf")" ] && carrier_names+="$(warped_name "$conf" "$name") "
     done
     # Warped first: the composite's default (first) tunnel is a warped one when there is one
     files=("$dir"/config/warped.*.conf)
@@ -445,7 +456,7 @@ cmd_build() {
     out="$name.json"
     stage_group "$dir/sing-box/$out" "${!tags[@]}"
     written+="$out "
-    # Groups: <server>.all.<device> for each first word of the tunnels' names
+    # Groups: <server>.list.<device> for each first word of the tunnels' names
     # (warp counts as warped). Only with two or more.
     for i in "${!tags[@]}"; do
         k=$(group_key "${tags[i]}")
@@ -457,7 +468,7 @@ cmd_build() {
             [ "$(group_key "${tags[i]}")" = "$k" ] && members+=("$i")
         done
         [ ${#members[@]} -ge 2 ] || continue
-        out="$k.all.$name.json"
+        out="$k.list.$name.json"
         stage_group "$dir/sing-box/$out" "${members[@]}"
         written+="$out "
     done
@@ -479,7 +490,7 @@ cmd_build() {
     fi
     echo "Next: AirDrop the profiles you want to the device and import each in sing-box"
     echo "      (Profiles > New Profile > Import). The composite (every tunnel) and the"
-    echo "      .all. groups (one server's, or the warped ones) switch tunnels in the app's"
+    echo "      .list. groups (one server's, or the warped ones) switch tunnels in the app's"
     echo "      picker without dropping the VPN; a one-tunnel profile switches by switching"
     echo "      profiles. They hold private keys: delete the copies you send."
 }
