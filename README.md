@@ -124,7 +124,7 @@ for 2.
 
 | Step | `install.sh` | `--sing-box` |
 |------|--------------|--------------|
-| Homebrew packages | `wireguard-tools` (`wg`, `wg-quick`, `wireguard-go`), `wgcf` (WARP accounts), `jq` (sing-box profiles) | `wgcf`, `jq` |
+| Homebrew packages | `wireguard-tools` (`wg`, `wg-quick`, `wireguard-go`), `wgcf` (WARP accounts), `jq` (sing-box profiles), `qrencode` ([qr.sh](#a-tunnel-as-a-qr-code)) | `wgcf`, `jq`, `qrencode` |
 | Folders | This Mac's device, `~/wg-tunnels/devices/<mac>/`; writes `<mac>` to `.default` | A first device, `~/wg-tunnels/devices/<device>/` (`singbox.sh new`) |
 | WARP | Registers a free WARP account for this Mac (`wgcf register`, which accepts Cloudflare's terms of service) and writes `$(brew --prefix)/etc/wireguard/warp.conf` from it | The first device's own account |
 | Daemon | Installs `/usr/local/sbin/wg-tunnels` (a copy of `tunnel.sh`) and the `com.local.wg-tunnels` LaunchDaemon, using `sudo`, when the repo copy differs or the LaunchDaemon is missing | none |
@@ -454,7 +454,7 @@ rm -f "$(defaults read com.ameba.SwiftBar PluginDirectory)/tunnel-status.5s.sh"
 brew uninstall --cask swiftbar                            # if nothing else uses it
 ```
 
-And the packages, if nothing else uses them: `brew uninstall wgcf wireguard-tools jq`.
+And the packages, if nothing else uses them: `brew uninstall wgcf wireguard-tools jq qrencode`.
 
 ## Sing-Box Device Tunnels
 
@@ -557,6 +557,24 @@ chat or a shared folder.
 
 The app's QR scanner only takes links, not a whole profile, so it won't work
 for these.
+
+### A tunnel as a QR code
+
+For the WireGuard app rather than sing-box, `scripts/qr.sh` shows any
+tunnel in a device's `config/` as a QR code, to scan with *+ > Create from QR
+code*:
+
+```
+scripts/qr.sh                      # pick a device, then one of its tunnels
+scripts/qr.sh iphone               # pick one of iphone's tunnels
+scripts/qr.sh iphone warp.iphone   # that one (a name, or its number)
+```
+
+`warp.<device>` is WARP alone; any plain tunnel works too. A `warped.*`
+tunnel only carries WARP, and the WireGuard app can't run one tunnel inside
+another, so it does nothing there alone: use sing-box for those. The QR holds
+the private key: show it only to the device it's for, and clear the terminal
+after (Cmd-K).
 
 ### Updating a device
 

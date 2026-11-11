@@ -13,7 +13,7 @@
 #   option, or no terminal, skips the questions.
 #
 #   (default)     Local Mac Tunnels, and what Sing-Box Device Tunnels need too.
-#                 Homebrew packages wireguard-tools, wgcf and jq; this Mac's device
+#                 Homebrew packages wireguard-tools, wgcf, jq and qrencode; this Mac's device
 #                 folder ~/wg-tunnels/devices/<name> (asked the first time, then
 #                 kept in ~/wg-tunnels/devices/.default);
 #                 a Cloudflare WARP account and $(brew --prefix)/etc/wireguard/warp.conf;
@@ -29,7 +29,7 @@
 #                 become: scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>)
 #   --sing-box [--device <name>]
 #                 Only what building sing-box profiles needs (singbox.sh): wgcf,
-#                 jq, ~/wg-tunnels/devices and a first device (asked, or
+#                 jq (and qrencode, for qr.sh), ~/wg-tunnels/devices and a first device (asked, or
 #                 --device; singbox.sh new makes more). No Local Mac Tunnels: no
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
 #                 without --sing-box to add Local Mac Tunnels later
@@ -105,9 +105,10 @@ BREW_PREFIX="$(brew --prefix)"
 ok "brew ($BREW_PREFIX)"
 
 # wireguard-tools brings wg, wg-quick, wireguard-go and the bash wg-quick needs
-# (Local Mac Tunnels); wgcf makes WARP accounts; jq writes sing-box profiles
-pkgs="wireguard-tools wgcf jq"
-[ "$singbox_only" = 1 ] && pkgs="wgcf jq"
+# (Local Mac Tunnels); wgcf makes WARP accounts; jq writes sing-box profiles;
+# qrencode shows a tunnel as a QR for the WireGuard app (scripts/qr.sh)
+pkgs="wireguard-tools wgcf jq qrencode"
+[ "$singbox_only" = 1 ] && pkgs="wgcf jq qrencode"
 for pkg in $pkgs; do
     if brew list --formula "$pkg" >/dev/null 2>&1; then
         ok "$pkg"
