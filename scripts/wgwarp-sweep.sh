@@ -9,7 +9,7 @@
 #   wgwarp-sweep.sh <dir>       any folder with carriers/ in it
 #
 # Also writes config/warp.<device>.conf: the device's WARP alone (from warp/),
-# for the WireGuard app.
+# a plain tunnel (tunnel.sh import runs it like any other; or the WireGuard app).
 #
 # Reads every carriers/<name>.conf (as downloaded from the provider) and writes
 # config/warped.<name>.<device>.conf: AllowedIPs set to the WARP endpoint (plus
@@ -33,8 +33,8 @@
 # it for this Mac with SWEEP_NO_NEXT=1 (no "Next: tunnel.sh import" line).
 # Neither needs it run by hand.
 #
-# The WARP endpoint comes from ~/wg-tunnels/.warp-endpoint (IPv4:port; default
-# 162.159.192.1:2408; only the address is used here).
+# The WARP endpoint comes from <device>/.warp-endpoint, else
+# ~/wg-tunnels/.warp-endpoint (IPv4:port; default 162.159.192.1:2408).
 
 die() { echo "wgwarp-sweep.sh: $*" >&2; exit 1; }
 
@@ -60,12 +60,16 @@ APP=""
 DEVICE=$(basename "$(cd "$DIR" && pwd)")      # always last in warped names
 CARRIER_DIR="$DIR/carriers"
 CONFIG_DIR="$DIR/config"
-# The WARP endpoint: ~/wg-tunnels/.warp-endpoint (one line, IPv4:port), else
-# Cloudflare's default. A file, not a variable, so the menu bar sees it too.
-WARP_ENDPOINT=162.159.192.1:2408
-[ -f "$HOME/wg-tunnels/.warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$HOME/wg-tunnels/.warp-endpoint")
+# The WARP endpoint: <device>/.warp-endpoint, else ~/wg-tunnels/.warp-endpoint
+# (one line, IPv4:port), else Cloudflare's default. Per device for one whose
+# network routes the shared address elsewhere (a router whose own WARP holds a
+# route to it). singbox.sh reads them the same way.
+WARP_ENDPOINT=162.159.192.1:2408 EP_FILE=""
+for f in "$DIR/.warp-endpoint" "$HOME/wg-tunnels/.warp-endpoint"; do
+    [ -f "$f" ] && { EP_FILE="$f"; WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$f"); break; }
+done
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
-    || die "~/wg-tunnels/.warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
+    || die "${EP_FILE}: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
 WARP_NET="${WARP_ENDPOINT%:*}/32"
 
 # These hold private keys
@@ -236,9 +240,10 @@ for raw in "${raws[@]}"; do
     fi
 done
 
-# warp.<device>: the device's WARP alone (no carrier), as a plain config for
-# the WireGuard app, on the same endpoint as the warped tunnels. tunnel.sh
-# import and singbox.sh build skip it: each makes its own from warp/.
+# warp.<device>: the device's WARP alone (no carrier), as a plain config, on
+# the same endpoint as the warped tunnels. tunnel.sh import takes it as a full
+# tunnel (one tunnel at a time, so its key never runs twice); singbox.sh build
+# skips it and makes its own from warp/.
 if [ -f "$DIR/warp/wgcf-profile.conf" ]; then
     name="warp.$DEVICE"; out="$CONFIG_DIR/$name.conf"
     names+="$name "
@@ -246,7 +251,7 @@ if [ -f "$DIR/warp/wgcf-profile.conf" ]; then
     sed -E "s/^([[:space:]]*[Ee][Nn][Dd][Pp][Oo][Ii][Nn][Tt][[:space:]]*=[[:space:]]*).*/\1$WARP_ENDPOINT/" \
         "$DIR/warp/wgcf-profile.conf" > "$tmp" || { rm -f "$tmp"; die "can't render $DIR/warp/wgcf-profile.conf"; }
     state=$(place "$tmp" "$out") || exit 1
-    row "$name" "$state" "(WARP alone, for the WireGuard app)"
+    row "$name" "$state" "(WARP alone, a plain tunnel)"
 fi
 
 # config/ files no carrier claims: one carrying only the WARP endpoint (plus

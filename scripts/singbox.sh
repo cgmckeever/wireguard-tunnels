@@ -35,8 +35,8 @@
 # set by tunnel.sh default). Its profiles use the daemon's keys: run one or
 # the other, never both (tunnel.sh down before turning sing-box on).
 #
-# The WARP endpoint comes from ~/wg-tunnels/.warp-endpoint (IPv4:port; default
-# 162.159.192.1:2408).
+# The WARP endpoint comes from <device>/.warp-endpoint, else
+# ~/wg-tunnels/.warp-endpoint (IPv4:port; default 162.159.192.1:2408).
 
 set -o pipefail
 TUNNELS_DIR="$HOME/wg-tunnels/devices"
@@ -46,15 +46,21 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 umask 077
 die() { echo "singbox.sh: $*" >&2; exit 1; }
 
-# The WARP endpoint: ~/wg-tunnels/.warp-endpoint (one line, IPv4:port), else
-# Cloudflare's default. A file, not a variable, so the menu bar sees it too.
-WARP_ENDPOINT=162.159.192.1:2408
-[ -f "$HOME/wg-tunnels/.warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$HOME/wg-tunnels/.warp-endpoint")
-[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
-    || die "~/wg-tunnels/.warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
-WARP_HOST="${WARP_ENDPOINT%:*}"
-WARP_PORT="${WARP_ENDPOINT##*:}"
-WARP_NET="$WARP_HOST/32"
+# warp_endpoint <device dir>: WARP_ENDPOINT/HOST/PORT/NET from
+# <device>/.warp-endpoint, else ~/wg-tunnels/.warp-endpoint (one line,
+# IPv4:port), else Cloudflare's default. The sweep reads them the same way.
+warp_endpoint() {
+    local f src=""
+    WARP_ENDPOINT=162.159.192.1:2408
+    for f in "$1/.warp-endpoint" "$HOME/wg-tunnels/.warp-endpoint"; do
+        [ -f "$f" ] && { src="$f"; WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$f"); break; }
+    done
+    [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
+        || die "${src}: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
+    WARP_HOST="${WARP_ENDPOINT%:*}"
+    WARP_PORT="${WARP_ENDPOINT##*:}"
+    WARP_NET="$WARP_HOST/32"
+}
 
 device_dir() {
     [ -n "$1" ] || die "a device name, please (singbox.sh $2 <device>)"
@@ -410,6 +416,7 @@ cmd_build() {
     profile="$dir/warp/wgcf-profile.conf"
     [ -f "$profile" ] || die "no WARP profile in $dir/warp ($setup)"
     why=$(unusable "$profile"); [ -z "$why" ] || die "WARP profile $profile: $why"
+    warp_endpoint "$dir"
 
     echo "== Sweep $dir/carriers"
     SWEEP_FOR_SINGBOX=1 "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"

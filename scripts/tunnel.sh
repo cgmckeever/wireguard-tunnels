@@ -32,13 +32,20 @@
 #                           tunnel that's up. The old account's files are
 #                           removed once that works (Cloudflare isn't told),
 #                           or put back if registering fails.
+#   tunnel.sh pause [min]   Kill switch off and tunnel down for min minutes
+#                           (default 10; for a hotel or café sign-in page), then
+#                           the daemon brings the tunnel back by itself
+#   tunnel.sh resume        End a pause now
+#   tunnel.sh diag [file]   Diagnostics in one file (status, configs, routes, DNS,
+#                           the log), private and preshared keys removed
 #   tunnel.sh log           Follow the daemon's log
 #   tunnel.sh breakglass    Lost the network? Stops app tunnels, the daemon,
 #                           wg-quick and wireguard-go; removes every route of ours
 #                           and any reject route; puts tunnel DNS back to DHCP;
 #                           power cycles Wi-Fi if it has no address. Trusts no state.
 #
-# up, down, import, rotate-warp, update, install, uninstall and breakglass use sudo
+# up, down, pause, resume, import, rotate-warp, diag, update, install, uninstall
+# and breakglass use sudo
 # (admin users).
 #
 # install.sh (in this repo) sets up what this needs: wireguard-tools, wgcf,
@@ -86,7 +93,7 @@ ETC="${WGT_ETC:-$PREFIX/etc/wg-tunnels}"
 RUN="${WGT_RUN:-/var/run/wg-tunnels}"
 CONF="$ETC/conf"                       # <iface>.conf, 0600 (private keys)
 TSV="$ETC/tunnels.tsv"                 # name iface kind endpoint-ip
-STATE="$ETC/state"                     # desired, last-warped, last-other
+STATE="$ETC/state"                     # desired (up <name> | down | pause <name> <until>), last-warped, last-other
 WARP_SRC="$PREFIX/etc/wireguard/warp.conf"  # written by install.sh
 WG_RUN="${WGT_WG_RUN:-/var/run/wireguard}"  # wg-quick's <iface>.name -> utunN
 
@@ -96,6 +103,9 @@ WAIT_SECS=30
 WATCH_SECS=30
 NET_SECS=5      # how often to look for a network change (cheap: no wg calls)
 STALE_SECS=180
+PROBE_IP=1.1.1.1  # answers ping through WARP; for fit_path_mtu
+MTU_EVERY=10      # WARP alone: measure again every 10 watchdog runs (5 min)
+MTU_TICK=0
 V4_HALVES="0.0.0.0/1 128.0.0.0/1"
 V6_HALVES="::/1 8000::/1"
 V4_QUARTERS="0.0.0.0/2 64.0.0.0/2 128.0.0.0/2 192.0.0.0/2"
@@ -288,8 +298,10 @@ resolve() {
 }
 
 # _import <dir> [dry]: dry reports what an import would do and changes nothing
+# _import <dir> [dry] [changes]: changes prints only what changed (the dry run
+# before it showed the rest)
 cmd_import_root() {
-    local src="$1" dry="${2:-}" f name kind ep host ip iface out tmp state n wep active why rows="" seen=""
+    local src="$1" dry="${2:-}" changes="${3:-}" f name kind ep host ip iface out tmp state n wep active why rows="" seen="" w same=0
     need_root import
     [ -d "$src" ] || die "No folder ${src}"
     if [ -z "$dry" ]; then
@@ -313,30 +325,34 @@ cmd_import_root() {
     state=$(settle "$tmp" "$CONF/warp.conf")
 
     active=$(awk '$1 == "name" {print $2}' "$RUN/status" 2>/dev/null)
-    printf '%-28s %-7s %-6s %s\n' TUNNEL KIND IFACE FILE
-    printf '%-28s %-7s %-6s %s\n' "(WARP)" - - "$state"
+    # The name column fits the longest name, new or old
+    w=$( { for f in "$src"/*.conf; do basename "$f" .conf; done; cut -f1 "$TSV" 2>/dev/null; } \
+        | awk '{ if (length > m) m = length } END { print (m > 28 ? m : 28) }')
+    row() {  # row <name> <kind> <iface> <state>
+        if [ -n "$changes" ] && [ "$4" = unchanged ]; then
+            same=$((same + 1)); return
+        fi
+        printf "%-${w}s %-7s %-6s %s\n" "$@"
+    }
+    row TUNNEL KIND IFACE FILE
+    row "(WARP)" - - "$state"
     for f in "$src"/*.conf; do
         [ -f "$f" ] || continue
         name=$(basename "$f" .conf)
         if ! grep -q '^\[Interface\]' "$f" || ! grep -q '^\[Peer\]' "$f" \
             || [ -z "$(conf_val "$f" PrivateKey)" ] || [ -z "$(conf_val "$f" Endpoint)" ]; then
-            printf '%-28s %-7s %-6s %s\n' "$name" - - "skipped: not a WireGuard config"
-            continue
-        fi
-        # The sweep's warp.<device>.conf: this Mac's WARP, already run as (WARP)
-        if [ "$(conf_val "$f" PrivateKey)" = "$(conf_val "$WARP_SRC" PrivateKey)" ]; then
-            printf '%-28s %-7s %-6s %s\n' "$name" - - "skipped: this Mac's WARP key, run as (WARP)"
+            row "$name" - - "skipped: not a WireGuard config"
             continue
         fi
         kind=$(kind_of "$name" "$f")
         if [ "$kind" = warped ] && ! why=$(swept_ok "$f" "$wep"); then
-            printf '%-28s %-7s %-6s %s\n' "$name" "$kind" - "skipped: ${why} (not as the sweep writes it: is its carrier in carriers/?)"
+            row "$name" "$kind" - "skipped: ${why} (not as the sweep writes it: is its carrier in carriers/?)"
             continue
         fi
         host=$(conf_val "$f" Endpoint | host_of)
         ip=$(resolve "$host")
         if [ -z "$ip" ]; then
-            printf '%-28s %-7s %-6s %s\n' "$name" "$kind" - "skipped: can't resolve ${host}"
+            row "$name" "$kind" - "skipped: can't resolve ${host}"
             continue
         fi
         # Keep a tunnel's interface name across imports; new ones get the next free wtN
@@ -353,10 +369,17 @@ cmd_import_root() {
         out="$CONF/$iface.conf"
         tmp=$(tmpfile import)
         render "$f" "$kind" "$wep" "$ip" > "$tmp"
+        # WARP alone: a keepalive, as WARP has inside a warped tunnel. It
+        # handshakes at once, and a stale handshake means trouble (the watchdog)
+        if [ "$(conf_val "$f" PrivateKey)" = "$(conf_val "$WARP_SRC" PrivateKey)" ] \
+            && ! grep -qi '^[[:space:]]*PersistentKeepalive' "$tmp"; then
+            sed -i '' -E 's/^([[:space:]]*Endpoint[[:space:]]*=.*)$/\1\
+PersistentKeepalive = 25/' "$tmp"
+        fi
         state=$(settle "$tmp" "$out")
         [ "$name" = "$active" ] && [ "$state" = updated ] && state="updated (up now: re-run tunnel.sh up)"
         rows+="${name}"$'\t'"${iface}"$'\t'"${kind}"$'\t'"${ip}"$'\n'
-        printf '%-28s %-7s %-6s %s\n' "$name" "$kind" "$iface" "$state"
+        row "$name" "$kind" "$iface" "$state"
     done
 
     # Tunnels gone from the export: removed, unless up right now
@@ -365,13 +388,14 @@ cmd_import_root() {
         printf '%s' "$rows" | awk -F'\t' -v n="$name" '$1 == n {f = 1} END {exit !f}' && continue
         if [ "$name" = "$active" ]; then
             rows+="${name}"$'\t'"${iface}"$'\t'"${kind}"$'\t'"${ip}"$'\n'
-            printf '%-28s %-7s %-6s %s\n' "$name" "$kind" "$iface" "kept: up now (tunnel.sh down, then import again)"
+            row "$name" "$kind" "$iface" "kept: up now (tunnel.sh down, then import again)"
         else
             [ -n "$dry" ] || rm -f "$CONF/$iface.conf"
-            printf '%-28s %-7s %-6s %s\n' "$name" "$kind" "$iface" "removed"
+            row "$name" "$kind" "$iface" "removed"
         fi
     done < <(cat "$TSV" 2>/dev/null)
 
+    [ "$same" -gt 0 ] && echo "(${same} more unchanged, as above)"
     [ -n "$dry" ] || put "$TSV" "$(printf '%s' "$rows" | sort -f -t$'\t' -k1,1)" 644
 }
 
@@ -414,6 +438,34 @@ fit_warp_mtu() {  # fit_warp_mtu <carrier iface> <name>
     [ -n "$cm" ] && [ -n "$wm" ] && [ $((cm - 80)) -lt "$wm" ] || return 0
     ifconfig "$(utun_of warp)" mtu $((cm - 80)) \
         && log "WARP MTU $((cm - 80)), inside ${2} (MTU ${cm})"
+}
+
+# WARP alone (a tunnel on this Mac's WARP key, warp.<device>) has no carrier
+# of ours, but there can be one we can't see: a travel router that tunnels
+# everything, say. If that one can't fit WARP's packets, ping works and nothing
+# else does. WARP's endpoint doesn't answer ping, so measure through WARP
+# itself: a don't-fragment ping of the full MTU to PROBE_IP. Lost, but a
+# 1200-byte one gets through: run WARP at 1200. Starts from the config's MTU
+# each time, so a better network gets it back. Measured on up, on a gateway
+# change, and every 5 minutes (a router may switch its exit behind the same
+# gateway).
+warp_alone() { [ "$(conf_val "$CONF/$1.conf" PrivateKey)" = "$(conf_val "$CONF/warp.conf" PrivateKey)" ]; }
+probe() { ping -c2 -i0.2 -t3 -D -s $(( $1 - 28 )) "$PROBE_IP" >/dev/null 2>&1; }
+fit_path_mtu() {  # fit_path_mtu <iface> <name>
+    local u full prev
+    u=$(utun_of "$1") || return 0
+    full=$(conf_val "$CONF/$1.conf" MTU); full="${full:-1280}"
+    prev=$(if_mtu "$u")
+    [ "$prev" = "$full" ] || ifconfig "$u" mtu "$full"
+    probe "$full" && { [ "$prev" = "$full" ] || log "${2}: MTU ${full} fits this network again"; return 0; }
+    # A few tries: after a network change WARP may still be re-handshaking
+    if [ "$full" -gt 1200 ] && ifconfig "$u" mtu 1200 && wait_until 3 probe 1200; then
+        [ "$prev" = 1200 ] || log "${2}: ${full}-byte packets don't get through this network (a tunnel on the router?): MTU 1200"
+    else
+        # No answer at all (ICMP blocked, or the network is still settling): as it was
+        ifconfig "$u" mtu "${prev:-$full}"
+        log "${2}: no ping answer through it, MTU left at ${prev:-$full}"
+    fi
 }
 
 # /31 around the WARP endpoint (more specific than the /2s, less than the carrier's /32)
@@ -492,6 +544,7 @@ reap_monitors() {  # reap_monitors <iface>
 progress() {  # a line for the waiting `tunnel.sh up/down`, and the log
     log "$*"
     echo "$*" >> "$RUN/progress"
+    write_status
 }
 
 # Every wg-quick interface of ours that's up: WARP first
@@ -511,13 +564,32 @@ teardown() {
     rm -f "$RUN/current"
 }
 
+# During an apply it gives up as soon as a new request comes in (a down while
+# an up waits for its handshake), so the daemon can take that one at once.
 wait_until() {  # wait_until <secs> <cmd...>
     local n="$1" i=0
     shift
     until "$@"; do
         [ "$i" -ge "$n" ] && return 1
         sleep 1; i=$((i + 1))
+        write_status   # an apply can take a minute: the menu must not think the daemon died
+        if [ -n "$APPLY_REQ" ] && [ "$(cat "$RUN/request" 2>/dev/null)" != "$APPLY_REQ" ]; then
+            SUPERSEDED=1; return 1
+        fi
     done
+}
+
+# A step of an up failed: say why, unless a newer request cut it short
+failed() {
+    if [ -n "$SUPERSEDED" ]; then progress "stopped: a newer request came in"; else progress "fail: $*"; fi
+    return 1
+}
+
+# Bytes through a wg-quick interface, for a failed handshake: nothing received
+# means the other end never answered (blocked on the way, or not listening)
+traffic_of() {
+    wg show "$(utun_of "$1")" transfer 2>/dev/null \
+        | awk '{rx += $2; tx += $3} END {printf "sent %d bytes, received %d", tx, rx}'
 }
 
 has_hs() { [ -n "$(hs_age "$1")" ]; }
@@ -542,7 +614,7 @@ apply_up() {
     else
         arm; teardown
         progress "pinning ${ip} to the gateway"
-        wait_until "$WAIT_SECS" pin "$ip" || { progress "fail: no default gateway to pin ${ip} to"; return 1; }
+        wait_until "$WAIT_SECS" pin "$ip" || { failed "no default gateway to pin ${ip} to"; return 1; }
     fi
 
     progress "starting ${name} (${iface})"
@@ -551,7 +623,7 @@ apply_up() {
 
     if [ "$kind" = warped ]; then
         wait_until 5 routes_via "$(warp_ep)" "$iface" \
-            || { progress "fail: WARP endpoint doesn't route into ${iface}"; return 1; }
+            || { failed "WARP endpoint doesn't route into ${iface}"; return 1; }
         progress "starting WARP inside ${name}"
         wgq up warp || { progress "fail: wg-quick up warp"; return 1; }
         fit_warp_mtu "$iface" "$name"
@@ -560,7 +632,12 @@ apply_up() {
     [ "$kind" = split ] || take_traffic "$exit_if"
 
     progress "waiting for a ${exit_if} handshake"
-    wait_until "$WAIT_SECS" has_hs "$exit_if" || { progress "fail: no ${exit_if} handshake in ${WAIT_SECS}s"; return 1; }
+    wait_until "$WAIT_SECS" has_hs "$exit_if" \
+        || { failed "no ${exit_if} handshake in ${WAIT_SECS}s ($(traffic_of "$exit_if"))"; return 1; }
+    if [ "$kind" = full ] && warp_alone "$iface"; then
+        progress "measuring what fits through ${name}"
+        fit_path_mtu "$iface" "$name"
+    fi
 
     put "$RUN/current" "$name $iface $kind $exit_if"
     if [ "$kind" = warped ]; then put "$STATE/last-warped" "$name"; else put "$STATE/last-other" "$name"; fi
@@ -574,15 +651,33 @@ apply_down() {
 }
 
 apply() {  # apply <request-id> — the desired state; progress ends with ok/fail
-    local want name
-    read -r want name 2>/dev/null < "$STATE/desired"
+    local want name until
+    read -r want name until 2>/dev/null < "$STATE/desired"
     put "$RUN/progress" "req $1"
-    STALE=0
+    STALE=0 SUPERSEDED=""
+    APPLY_REQ=$(cat "$RUN/request" 2>/dev/null)
     if [ "$want" = up ]; then
+        CONNECTING=1
         if apply_up "$name"; then echo ok >> "$RUN/progress"; else echo fail >> "$RUN/progress"; fi
+        CONNECTING=""
+    elif [ "$want" = pause ]; then
+        apply_down
+        progress "paused: ${name} comes back at $(date -r "${until:-0}" +%H:%M)"
+        echo ok >> "$RUN/progress"
     else
         apply_down; echo ok >> "$RUN/progress"
     fi
+    APPLY_REQ=""
+}
+
+# A pause whose time is up: back to the tunnel it paused
+resume_if_due() {
+    local want name until
+    read -r want name until 2>/dev/null < "$STATE/desired"
+    [ "$want" = pause ] && [ "$(date +%s)" -ge "${until:-0}" ] || return 0
+    log "pause over: resuming ${name}"
+    put "$STATE/desired" "up ${name}"
+    put "$RUN/request" "resume.$(date +%s)"
 }
 
 # Every $WATCH_SECS while up
@@ -603,12 +698,20 @@ watchdog() {
         if [ -n "$gw" ] && [ "$gw" != "$pgw" ]; then
             log "watchdog: gateway ${pgw:-none} -> ${gw}, re-pinning ${ip}"
             pin "$ip"
+            # A new network: what fits WARP alone may differ
+            [ "$kind" = full ] && warp_alone "$iface" && { MTU_TICK=0; fit_path_mtu "$iface" "$name"; }
         elif [ -n "$gw" ] && [ "$cur" != "$gw" ]; then
             # macOS drops routes through an interface that goes down: rejoining
             # the same network leaves the gateway as it was, and the pin gone
             log "watchdog: route to ${ip} gone (network came back), re-pinning"
             pin "$ip"
         fi
+    fi
+    # WARP alone, again every MTU_EVERY watchdog runs: a router can switch its
+    # own exit (and that tunnel's MTU) behind the same gateway
+    if [ "$kind" = full ] && warp_alone "$iface"; then
+        MTU_TICK=$((MTU_TICK + 1))
+        [ "$MTU_TICK" -ge "$MTU_EVERY" ] && { MTU_TICK=0; fit_path_mtu "$iface" "$name"; }
     fi
     # The exit's handshake: WARP, or the tunnel itself. Only with a keepalive,
     # without one an idle tunnel has no handshakes either.
@@ -643,15 +746,43 @@ net_changed() {
     [ "$cur" != "$gw" ]
 }
 
+# state, one word the menu shows as it is (only what the daemon has seen):
+#   up <name>            the exit has a recent handshake
+#   reconnecting <name>  up, but the exit has been silent over STALE_SECS
+#   connecting <name>    applying an up (also a watchdog restart)
+#   blocked <name>       wanted up, not up, kill switch on: nothing leaves
+#   failed <name>        wanted up, not up, no kill switch (a split tunnel)
+#   paused <name> <t>    pause: down, kill switch off, back at epoch t
+#   down
 write_status() {
-    local name iface kind exit_if out
+    local name iface kind exit_if out want wname until age state
+    read -r want wname until 2>/dev/null < "$STATE/desired"
     out="armed $([ -f "$RUN/armed" ] && echo yes || echo no)"
-    out+=$'\n'"desired $(cat "$STATE/desired" 2>/dev/null || echo down)"
+    out+=$'\n'"desired ${want:-down}${wname:+ $wname}${until:+ $until}"
+    if [ "$want" = pause ]; then
+        state="paused ${wname} ${until}"
+    elif [ -n "$CONNECTING" ]; then
+        state="connecting ${wname}"
+    elif [ "$want" = up ]; then
+        [ -f "$RUN/armed" ] && state="blocked ${wname}" || state="failed ${wname}"
+    else
+        state="down"
+    fi
     if read -r name iface kind exit_if 2>/dev/null < "$RUN/current"; then
         out+=$'\n'"name ${name}"$'\n'"kind ${kind}"
         out+=$'\n'"iface ${iface} $(utun_of "$iface") $(hs_age "$iface")"
         [ "$exit_if" = warp ] && out+=$'\n'"warp warp $(utun_of warp) $(hs_age warp)"
+        # Only an up decides by what's running: mid-teardown is still down/paused
+        if [ "$want" = up ] && [ -z "$CONNECTING" ]; then
+            state="up ${name}"
+            # As the watchdog judges it: only an exit with a keepalive must handshake
+            if grep -qi '^[[:space:]]*PersistentKeepalive' "$CONF/$exit_if.conf" 2>/dev/null; then
+                age=$(hs_age "$exit_if")
+                { [ -z "$age" ] || [ "$age" -gt "$STALE_SECS" ]; } && state="reconnecting ${name}"
+            fi
+        fi
     fi
+    out+=$'\n'"state ${state}"
     [ -f "$RUN/pin" ] && out+=$'\n'"pin $(cat "$RUN/pin")"
     out+=$'\n'"updated $(date +%s)"
     put "$RUN/status" "$out"
@@ -665,6 +796,7 @@ cmd_daemon() {
     rm -f "$RUN/armed" "$RUN/current"   # routes don't survive a reboot; a restart re-applies
     log "daemon start"
     while true; do
+        resume_if_due
         req=$(cat "$RUN/request" 2>/dev/null)
         req="${req:-boot}"
         if [ "$req" != "$applied" ]; then
@@ -683,17 +815,29 @@ cmd_daemon() {
     done
 }
 
-# root side of up/down: record what's wanted and wake the daemon
+# root side of up/down/pause: record what's wanted and wake the daemon
 cmd_request() {
+    local want name
     need_root request
-    if [ "$1" = up ]; then
-        [ -n "$(tsv_get "$2")" ] || die "No tunnel '$2'"
-        put "$STATE/desired" "up $2"
-    else
-        put "$STATE/desired" "down"
-    fi
+    case "$1" in
+        up)
+            [ -n "$(tsv_get "$2")" ] || die "No tunnel '$2'"
+            put "$STATE/desired" "up $2"
+            ;;
+        pause)
+            read -r want name _ 2>/dev/null < "$STATE/desired"
+            case "$want" in up|pause) ;; *) die "Nothing to pause: no tunnel is wanted" ;; esac
+            valid_minutes "$2" || die "pause: minutes from 1 to 1440"
+            put "$STATE/desired" "pause ${name} $(( $(date +%s) + $2 * 60 ))"
+            ;;
+        *)
+            put "$STATE/desired" "down"
+            ;;
+    esac
     put "$RUN/request" "$(date +%s).$$"
 }
+
+valid_minutes() { [[ "$1" =~ ^[0-9]+$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 1440 ]; }
 
 # --- install (root) ---
 
@@ -1069,6 +1213,81 @@ cmd_update() {
     sudo "$0" _install "$0"
 }
 
+# pause [min]: down with the kill switch off for min minutes (a sign-in page),
+# then the daemon brings the tunnel back. Again while paused: a new end time.
+cmd_pause() {
+    local m="${1:-10}"
+    valid_minutes "$m" || die "Usage: tunnel.sh pause [minutes, 1-1440] (default 10)"
+    check_installed
+    [ -x "$INSTALLED" ] || die "Not installed: nothing to pause"
+    root request pause "$m" || return 1
+    follow "$(cat "$RUN/request")"
+}
+
+cmd_resume() {
+    local want name
+    read -r want name _ 2>/dev/null < "$STATE/desired"
+    [ "$want" = pause ] || die "Not paused (wanted: ${want:-down})"
+    check_installed
+    root request up "$name" || return 1
+    follow "$(cat "$RUN/request")"
+}
+
+# diag [file]: everything needed to debug, in one file, keys removed. Runs the
+# repo's copy as root (works when the daemon is broken); the file is yours.
+cmd_diag() {
+    local out="${1:-$HOME/wg-tunnels/diag/diag-$(date +%Y%m%d-%H%M%S).txt}"
+    mkdir -p "$(dirname "$out")" || die "diag: can't make $(dirname "$out")"
+    sudo "$0" _diag > "$out" || { rm -f "$out"; die "diag: failed"; }
+    echo "$out"
+}
+
+# Private and preshared keys out of configs, wg output and the log
+redact() {
+    sed -E 's/^([[:space:]]*([Pp][Rr][Ii][Vv][Aa][Tt][Ee]|[Pp][Rr][Ee][Ss][Hh][Aa][Rr][Ee][Dd])[Kk][Ee][Yy][[:space:]]*=).*/\1 <removed>/
+            s/((private|preshared) key:).*/\1 <removed>/'
+}
+
+cmd_diag_root() {
+    local f
+    need_root diag
+    sec() { printf '\n== %s\n' "$*"; }
+    echo "wg-tunnels diagnostics, $(date '+%Y-%m-%d %H:%M:%S %z')"
+    echo "Private and preshared keys are removed. Server IPs, networks and the log"
+    echo "are not: read it before you share it."
+    sec system
+    sw_vers; uname -m
+    sec versions
+    shasum -a 256 "$0" "$INSTALLED" 2>&1 | sed -E 's/^([0-9a-f]{12})[0-9a-f]+/\1/'
+    wg --version 2>&1
+    launchctl print system/"$LABEL" 2>&1 | grep -E '^[[:space:]]*(state|pid|last exit code|runs) ' || echo "daemon not loaded"
+    sec status
+    cat "$RUN/status" 2>&1
+    sec "progress (last request)"
+    cat "$RUN/progress" 2>&1
+    sec state
+    for f in "$STATE"/*; do [ -f "$f" ] && echo "$(basename "$f"): $(cat "$f")"; done
+    sec tunnels.tsv
+    cat "$TSV" 2>&1
+    sec configs
+    for f in "$CONF"/*.conf; do
+        [ -f "$f" ] || continue
+        echo "-- $(basename "$f")"; redact < "$f"
+    done
+    sec "wg show"
+    wg show all 2>&1 | redact
+    sec interfaces
+    for f in $(ifconfig -l); do case "$f" in utun*|en*) ifconfig "$f" ;; esac; done
+    sec routes
+    netstat -rn
+    sec dns
+    scutil --dns | sed -n '1,/^DNS configuration (for scoped/p'
+    sec "WireGuard app"
+    scutil --nc list
+    sec "log (last 300 lines)"
+    tail -300 "$LOG" 2>&1 | redact
+}
+
 cmd_breakglass() {
     echo "Breakglass: stop every tunnel and put the normal connection back"
     stop_app_tunnels
@@ -1099,7 +1318,7 @@ exit_line() {
 }
 
 status() {
-    local apps upd age od
+    local apps upd age od want wname until
     list_all
     echo
     [ -s "$DEFAULT_FILE" ] && echo "device: $(cat "$DEFAULT_FILE") (tunnel.sh default)"
@@ -1108,7 +1327,13 @@ status() {
     else
         upd=$(st updated); age=$(( $(date +%s) - ${upd:-0} ))
         [ "$age" -gt 15 ] && echo "daemon: no update for ${age}s — tunnel.sh log"
-        echo "wanted: $(st desired)"
+        read -r want wname until <<< "$(st desired)"
+        if [ "$want" = pause ]; then
+            echo "paused: ${wname}, back at $(date -r "${until:-0}" +%H:%M) (tunnel.sh resume: now)"
+        else
+            echo "wanted: $(st desired)"
+        fi
+        [ -n "$(st state)" ] && echo "state:  $(st state | awk '{print $1}')"
         echo "kill switch: $(st armed)"
         [ -n "$(st name)" ] && echo "up:     $(st name) — $(st iface | awk '{printf "%s %s, handshake %ss ago", $1, $2, ($3 == "" ? "never " : $3)}')"
         [ -n "$(st warp)" ] && echo "warp:   $(st warp | awk '{printf "%s, handshake %ss ago", $2, ($3 == "" ? "never " : $3)}')"
@@ -1167,7 +1392,7 @@ cmd_extract() {
 # import [dir] [-y]: shows what it would do and asks first; -y, or no terminal
 # (the menu bar), goes ahead without asking
 cmd_import() {
-    local src="" yes="" a f n=0 answer dir sweep
+    local src="" yes="" a f n=0 answer dir sweep previewed=""
     for a in "$@"; do
         case "$a" in -y|--yes) yes=1 ;; "") ;; *) src="$a" ;; esac
     done
@@ -1196,17 +1421,21 @@ cmd_import() {
         read -rp "Go ahead? [y/N] " answer
         [[ "$answer" =~ ^[Yy] ]] || { echo "Nothing imported"; return 1; }
         echo
+        previewed=changes
     fi
     echo "Importing from ${src}"
-    if [ -n "$WGT_TEST" ]; then "$0" _import "$src"; else root _import "$src"; fi
+    if [ -n "$WGT_TEST" ]; then "$0" _import "$src" "" "$previewed"; else root _import "$src" "" "$previewed"; fi
 }
 
-usage() { echo "Usage: tunnel.sh up [n|name] | down | status | list | extract [zip] | import [dir] [-y] | extract-import [zip] | default [device] | update | install | uninstall | rotate-warp | log | breakglass"; }
+usage() { echo "Usage: tunnel.sh up [n|name] | down | pause [min] | resume | status | list | extract [zip] | import [dir] [-y] | extract-import [zip] | default [device] | update | install | uninstall | rotate-warp | diag [file] | log | breakglass"; }
 list_all() { echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other; }
 
 case "${1:-status}" in
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
+    pause)     cmd_pause "$2" ;;
+    resume)    cmd_resume ;;
+    diag)      cmd_diag "$2" ;;
     status)    check_installed; status; echo; usage ;;
     list)      list_all ;;
     extract)   cmd_extract "$2" ;;
@@ -1221,9 +1450,10 @@ case "${1:-status}" in
     breakglass) cmd_breakglass ;;
     daemon)    cmd_daemon ;;
     request)   cmd_request "$2" "$3" ;;
-    _import)   cmd_import_root "$2" "$3" ;;
+    _import)   cmd_import_root "$2" "$3" "$4" ;;
     _install)  cmd_install_root "$2" ;;
     _uninstall) cmd_uninstall_root ;;
     _breakglass) cmd_breakglass_root ;;
+    _diag)     cmd_diag_root ;;
     *) usage >&2; exit 1 ;;
 esac

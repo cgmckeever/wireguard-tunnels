@@ -195,11 +195,12 @@ as a word of its own between `.`, `_` or `-`, it's moved there:
 `carriers/proton.chicago_iphone-US-IL-802.conf` becomes
 `warped.proton.chicago-US-IL-802.iphone`.
 
-**WARP alone, for the WireGuard app.** The sweep also writes
-`config/warp.<device>.conf`: the device's WARP account from `warp/`, with no
-carrier, on the same [endpoint](#warp-endpoint) as the warped tunnels. Import
-it in the WireGuard app to run WARP there instead of in sing-box. Neither
-setup imports it: this Mac's daemon already runs that WARP as its own, and
+**WARP alone.** The sweep also writes `config/warp.<device>.conf`: the
+device's WARP account from `warp/`, with no carrier, on the same
+[endpoint](#warp-endpoint) as the warped tunnels. It's a plain tunnel: on
+this Mac `tunnel.sh import` takes it as a full tunnel (in the menu under
+OTHER), and it shares the WARP key safely because the daemon runs one tunnel
+at a time. It also works in the WireGuard app. sing-box doesn't use it:
 `build` makes `warp.<device>` from `warp/` directly. `singbox.sh new` runs the sweep
 too, so a new device has its `warp.<device>.conf` right away.
 
@@ -242,6 +243,18 @@ minus 80 (1200 inside a 1280 carrier). The sweep's report flags these
 carriers. Below 1280 there's no IPv6 inside WARP and QUIC falls
 back to TCP; pages still load.
 
+**WARP alone behind a tunnel you can't see.** `warp.<device>` on this Mac
+can ride a carrier that isn't the Mac's: a travel router that tunnels
+everything to a remote exit, say, so Cloudflare sees that exit. The daemon
+can't read that carrier's MTU, so it measures instead. Once WARP is up, it
+sends a full-size don't-fragment ping through it to `1.1.1.1` (WARP's
+endpoint doesn't answer ping). If that's lost but a 1200-byte one gets
+through, WARP runs at 1200. It measures again when the network changes and
+every 5 minutes (a router can switch exits behind the same address), and
+goes back to the config's MTU where that fits. The log says when it changes.
+Pick a router exit that doesn't go through WARP on the server, or it's WARP
+inside WARP.
+
 ### WARP endpoint
 
 WARP connects to `162.159.192.1:2408` unless `~/wg-tunnels/.warp-endpoint`
@@ -252,6 +265,14 @@ Mac, re-run `install.sh` (it rewrites the WARP config) and
 [import](#tunnelsh); for each sing-box device, [build](#singboxsh). Until
 then, this Mac skips warped tunnels whose endpoint doesn't match its WARP
 config.
+
+One device can have its own: `~/wg-tunnels/devices/<device>/.warp-endpoint`,
+same format, read before the shared file by the sweep and `singbox.sh build`.
+It's for a device whose own WARP would otherwise catch other devices' WARP: a
+router running WARP on `162.159.192.1` keeps a route to it out its WAN, so a
+Mac behind it that also uses `.1` has its WARP packets sent past the router's
+tunnel and dropped. Give the router another Cloudflare address (say
+`162.159.192.5:2408`) and leave everyone else on the shared one.
 
 ## Local Mac Tunnels
 
@@ -287,6 +308,8 @@ Lost the network, or also using the WireGuard app? See
 |---------|------|
 | `up [n\|name]` | Asks `warped [Y/n]`, then which tunnel (Enter = the last one used, or the only one). A number picks from the warped list; a name skips both questions |
 | `down` | Everything down, back to the normal connection |
+| `pause [min]` | For a hotel or café sign-in page: the tunnel down and the kill switch off for `min` minutes (default 10, up to 1440), then the daemon brings the tunnel back by itself, also after a reboot. Again while paused sets a new end time |
+| `resume` | End a pause now |
 | `status` (default) | Tunnels, what's up, handshakes, the kill switch, the exit IP |
 | `list` | Number the warped and other tunnels |
 | `import [dir] [-y]` | Turn `<mac>/carriers/` into [warped tunnels](#warped-tunnels) in `config/`, then install every `.conf` in `<mac>/config/` for the daemon, and sort each into its [kind](#tunnel-kinds). Given a `dir`, installs the `.conf` files there instead, with no sweep. Tunnels no longer there are removed, unless up right now. Shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y`, or no terminal, skips the question |
@@ -294,14 +317,15 @@ Lost the network, or also using the WireGuard app? See
 | `extract-import [zip]` | `extract`, then `import` |
 | `default [device]` | Show or change this Mac's device, saved in `~/wg-tunnels/devices/.default`. `extract`, `import` and `rotate-warp` use it. Changing it doesn't touch the daemon; run `import` after |
 | `rotate-warp` | New WARP keys: registers a new WARP account (through `install.sh`), imports it, and reconnects a warped tunnel that's up. The old account's files are deleted once that works (Cloudflare isn't told), or put back if registering fails. This Mac only: sing-box devices keep their own accounts |
+| `diag [file]` | Write one file with what's needed to debug: the daemon's status, configs, `wg show`, interfaces, routes, DNS and the last 300 log lines. Private and preshared keys are removed; server IPs and networks aren't, so read it before you share it. Default `~/wg-tunnels/diag/diag-<time>.txt` |
 | `log` | Follow the daemon's log |
 | `breakglass` | Lost the network? See [Troubleshooting](#troubleshooting) |
 | `update` | Update the daemon from the repo's `tunnel.sh`, only if it differs (or its LaunchDaemon is missing), e.g. after a `git pull`. Restarts the daemon, so a tunnel that's up drops for a few seconds |
 | `install` | Install just the daemon, even when it's current |
 | `uninstall` | Take everything down and remove the daemon; configs are kept |
 
-`up`, `down`, `import`, `rotate-warp`, `update`, `install`, `uninstall` and
-`breakglass` use `sudo`. `up`, `down` and `import` also update the daemon
+`up`, `down`, `pause`, `resume`, `import`, `rotate-warp`, `diag`, `update`,
+`install`, `uninstall` and `breakglass` use `sudo`. `up`, `down` and `import` also update the daemon
 first when the repo copy differs, as `update` does.
 
 #### Tunnel kinds
@@ -341,19 +365,38 @@ lock icon in the menu bar, through
 [SwiftBar](https://github.com/swiftbar/SwiftBar), showing whether you're
 protected:
 
-| Lock | Meaning |
-|------|---------|
-| green, locked | A tunnel is up (the daemon's, or one in the WireGuard app) |
-| orange, locked | A tunnel is wanted but not up: the kill switch is blocking traffic |
-| grey, open | No VPN |
+Each state has its own icon, and it comes from the daemon's status, so the
+lock is green only once the daemon has seen a handshake:
 
-The menu shows the tunnel, its uptime, the exit and real IPs with their city
-(from [ipinfo.io](https://ipinfo.io)), handshakes, the kill switch, and
-Tx/Rx. It has:
+| Icon | State |
+|------|-------|
+| green lock | Up: the exit has a recent handshake (or a tunnel in the WireGuard app is connected) |
+| yellow turning lock | Connecting, or reconnecting an exit that's gone silent |
+| orange lock with `!` | Blocked: a tunnel is wanted but not up, and the kill switch is holding traffic. The menu says why |
+| red open lock | Failed: a split tunnel isn't up (no kill switch, so traffic goes out normally) |
+| blue pause | Paused: no tunnel and no kill switch until the time shown |
+| grey open lock | No VPN |
+| red triangle | The daemon isn't answering |
+
+While a tunnel is up the menu shows its uptime, the exit and real IPs with
+their city (from [ipinfo.io](https://ipinfo.io)), handshakes, the kill
+switch and Tx/Rx, and two checks:
+
+- **WARP**: Cloudflare's own answer for the exit (`cdn-cgi/trace`): on, and
+  the data center. A warped tunnel that isn't exiting through WARP is shown
+  in red.
+- **DNS**: the system's resolver and whether its packets go out through the
+  tunnel's exit; red when they leave outside it, orange when the kill switch
+  blocks them.
+
+Both are checked again after every reconnect. The menu has:
 
 - **Status**, **Reconnect**, **Disconnect** and **Breakglass**.
+- **Pause Protection** for 5 minutes, 15 minutes or 1 hour, while the kill
+  switch is on (`tunnel.sh pause`), and **Resume Now** while paused.
 - Every imported tunnel, to switch to.
-- **More**: status in Terminal, the log, Rotate WARP Keys, and Update Daemon
+- **More**: status in Terminal, the log, Export Diagnostics (`tunnel.sh diag`;
+  shows the file in Finder), Rotate WARP Keys, and Update Daemon
   (`tunnel.sh update`; it says "out of date" when the repo's `tunnel.sh`
   differs from the daemon's copy).
 
@@ -377,7 +420,11 @@ What it installs:
 Start here when a tunnel or the network misbehaves.
 
 - **What's going on?** Run `tunnel.sh status`, then `tunnel.sh log` (the
-  daemon's log, `/var/log/wg-tunnels.log`).
+  daemon's log, `/var/log/wg-tunnels.log`). To send it to someone, use
+  `tunnel.sh diag`.
+- **Behind a hotel or café sign-in page?** The kill switch blocks it. Run
+  `tunnel.sh pause` (or the menu's Pause Protection), sign in, and the tunnel
+  comes back by itself.
 - **No network, even after `down`?** Run `tunnel.sh breakglass`. It trusts no
   saved state: it stops WireGuard app tunnels, the daemon, `wg-quick` and
   `wireguard-go`; removes every route of ours and any reject route; resets

@@ -1,8 +1,13 @@
 #!/bin/bash
 # SwiftBar plugin — VPN lock in the menu bar (refreshes every 5 seconds).
-#   locked, green   a tunnel is up (wg-tunnels daemon, or one in the WireGuard app)
-#   locked, orange  a tunnel is wanted but isn't up: kill switch on, traffic blocked
-#   open, grey      no VPN
+# One icon per state, from the daemon's own status (nothing is guessed):
+#   lock, green               up (wg-tunnels daemon, or a WireGuard app tunnel)
+#   lock turning, yellow      connecting, or reconnecting a silent exit
+#   lock with !, orange       blocked: wanted, not up, the kill switch holds traffic
+#   open lock, red            failed: a split tunnel that isn't up (no kill switch)
+#   pause, blue               paused: down with no kill switch until a set time
+#   open lock, grey           no VPN
+#   triangle, red             the daemon isn't answering
 # Reads /var/run/wg-tunnels/status (written by tunnel.sh's daemon).
 # The menu switches tunnels in the background: sudo asks with a dialog
 # (askpass.sh) and a notification says how it went.
@@ -54,6 +59,9 @@ if [ "$1" = run ]; then
     fi
     case "$1" in
         reconnect) ;;
+        pause) what="Pause for $2 min" ;;
+        resume) what="Resume" ;;
+        diag) what="Diagnostics" ;;
         up)   what="Switch to $2" ;;
         down) what="VPN off" ;;
         rotate-warp) what="New WARP keys" ;;
@@ -62,6 +70,10 @@ if [ "$1" = run ]; then
     esac
     if [ "$rc" -eq 0 ] && [ "$1" = update ] && grep -q "up to date" <<< "$out"; then
         notify "VPN" "Daemon: already up to date"
+    elif [ "$rc" -eq 0 ] && [ "$1" = diag ]; then
+        f=$(tail -1 <<< "$out")
+        notify "VPN" "Diagnostics saved, keys removed: $(basename "$f")"
+        open -R "$f"
     elif [ "$rc" -eq 0 ]; then
         notify "VPN" "${what}: done"
     else
@@ -78,12 +90,17 @@ if [ "$1" = popup ]; then
     trace=$(curl -s --max-time 6 https://www.cloudflare.com/cdn-cgi/trace)
     tv() { awk -F= -v k="$1" '$1 == k {print $2}' <<< "$trace"; }
     name=$(st name)
+    read -r pstate pname puntil <<< "$(st state)"
     apps=$(scutil --nc list | sed -nE \
         's/.*\((Connected)\)[[:space:]]+[0-9A-F-]{36} VPN \(com\.wireguard\.macos\) "([^"]+)".*/\2/p' | paste -sd, -)
     icons=/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources
     icon="$icons/LockedIcon.icns"
-    if [ -n "$name" ]; then title="VPN on: ${name}"
+    if [ "$pstate" = paused ]; then title="Paused: ${pname}, back at $(date -r "${puntil:-0}" +%H:%M)"; icon="$icons/UnlockedIcon.icns"
+    elif [ "$pstate" = connecting ]; then title="Connecting: ${pname}"
+    elif [ "$pstate" = reconnecting ]; then title="Reconnecting: ${name} (its exit went silent)"
+    elif [ -n "$name" ]; then title="VPN on: ${name}"
     elif [ -n "$apps" ]; then title="VPN on (WireGuard app): ${apps//,/, }"
+    elif [ "$pstate" = failed ]; then title="${pname} not up (split tunnel: traffic goes out normally)"; icon="$icons/UnlockedIcon.icns"
     elif [ "$(st desired | awk '{print $1}')" = up ]; then title="VPN wanted but not up — traffic blocked"
     else title="No VPN"; icon="$icons/UnlockedIcon.icns"; fi
     msg=""
@@ -115,14 +132,30 @@ fresh=""
 upd=$(st updated)
 [ -n "$upd" ] && [ $(( $(date +%s) - upd )) -le 15 ] && fresh=1
 
-name="" want="" armed="" hs="" warp_hs=""
+name="" kind="" want="" armed="" hs="" warp_hs="" state="" sname="" suntil=""
 if [ -n "$fresh" ]; then
     name=$(st name)
+    kind=$(st kind)
     want=$(st desired | awk '{print $1}')
     armed=$(st armed)
     hs=$(st iface | awk '{print $3}')
     warp_hs=$(st warp | awk '{print $3}')
+    read -r state sname suntil <<< "$(st state)"
+    # A daemon from before the state line: work it out as this plugin used to
+    if [ -z "$state" ]; then
+        sname=$(st desired | cut -d' ' -f2)
+        if [ -n "$name" ]; then state=up; sname="$name"
+        elif [ "$want" = up ]; then state=blocked
+        else state=down; fi
+    fi
 fi
+# The exit interface: WARP when warped, else the tunnel
+exit_u=""
+if [ -n "$name" ]; then
+    exit_u=$(st warp | awk '{print $2}'); [ -n "$exit_u" ] || exit_u=$(st iface | awk '{print $2}')
+fi
+# The daemon's last word on a request: why a tunnel isn't up, or what it's doing
+last_step() { grep -vE '^(req .*|ok|fail)$' "$(dirname "$STATUS")/progress" 2>/dev/null | tail -1; }
 
 # Traffic: the kernel's byte counters for the exit interface (WARP when warped,
 # else the tunnel), no root needed. Rates from the last run's sample.
@@ -151,10 +184,14 @@ lookup() {  # lookup <file> <key>: refresh <file> if its key differs or it's 10 
     (
         j=$(curl -s -m10 https://ipinfo.io/json)
         v() { sed -nE "s/.*\"$1\": *\"([^\"]*)\".*/\1/p" <<< "$j" | head -1; }
+        # Cloudflare's view: warp=on|off, and the data center (colo)
+        t=$(curl -s -m10 https://www.cloudflare.com/cdn-cgi/trace)
+        tv() { awk -F= -v k="$1" '$1 == k {print $2; exit}' <<< "$t"; }
         ip=$(v ip)
         if [ -n "$ip" ]; then
             place=$(printf '%s, %s, %s' "$(v city)" "$(v region)" "$(v country)" | sed 's/^, //; s/, , /, /')
-            echo "$key $(date +%s) ok $ip $place" > "$f"
+            w=$(tv warp); c=$(tv colo)
+            echo "$key $(date +%s) ok ${w:--} ${c:--} $ip $place" > "$f"
         else
             echo "$key $(date +%s) none" > "$f"
         fi
@@ -163,8 +200,8 @@ lookup() {  # lookup <file> <key>: refresh <file> if its key differs or it's 10 
 }
 
 shown() {  # shown <file> <key> <label>: the cached line, if it's for <key>
-    local k ts state ip place
-    read -r k ts state ip place 2>/dev/null < "$DATA/$1"
+    local k ts state w c ip place
+    read -r k ts state w c ip place 2>/dev/null < "$DATA/$1"
     if [ "$k" != "$2" ]; then echo "$3: unknown (new network since the last check without VPN)"; return; fi
     case "$state" in
         ok)   echo "$3: ${ip} — ${place}" ;;
@@ -181,20 +218,55 @@ net="${net:-${gw:-none}}"
 # WireGuard app tunnels that are connected (checked before the real IP lookup)
 apps=$(scutil --nc list | sed -nE \
     's/.*\((Connected)\)[[:space:]]+[0-9A-F-]{36} VPN \(com\.wireguard\.macos\) "([^"]+)".*/\2/p' | paste -sd, -)
-exit_ip="" real_ip=""
+exit_ip="" real_ip="" exit_key=""
 if [ -n "$name" ]; then
-    lookup exit "$name"
-    exit_ip=$(shown exit "$name" Exit)
+    # A new key on every (re)connect: what's shown was checked since
+    exit_key="${name}@$(stat -f %m "$(dirname "$STATUS")/current" 2>/dev/null)"
+    lookup exit-ip "$exit_key"
+    exit_ip=$(shown exit-ip "$exit_key" Exit)
 elif [ -n "$fresh" ] && [ -z "$apps" ] && [ "$want" != up ] \
     && [[ "$(route -n get 1.1.1.1 2>/dev/null | awk '/interface:/ {print $2}')" == en* ]]; then
     # Only when traffic really leaves through Wi-Fi/Ethernet, never a tunnel
-    lookup real "$net"
+    lookup real-ip "$net"
 fi
-real_ip=$(shown real "$net" "Real IP")
+real_ip=$(shown real-ip "$net" "Real IP")
+
+# WARP, as Cloudflare saw the exit (from the exit lookup above)
+warp_line=""
+if [ -n "$exit_key" ]; then
+    read -r k _ cst cwarp ccolo _ 2>/dev/null < "$DATA/exit-ip"
+    if [ "$k" = "$exit_key" ] && [ "$cst" = ok ]; then
+        if [ "$cwarp" = on ]; then
+            warp_line="WARP: on, Cloudflare ${ccolo} | size=12"
+        elif [ "$kind" = warped ]; then
+            warp_line="WARP: ${cwarp} — this warped tunnel isn't exiting through WARP | color=red"
+        fi
+    fi
+fi
+
+# DNS: the system's resolver, and the interface its packets take
+dns_line=""
+if [ -n "$name" ]; then
+    dns=$(scutil --dns | awk '/^resolver #1$/ {f = 1} f && /nameserver\[0\]/ {print $3; exit}')
+    dns_if=$(route -n get "$dns" 2>/dev/null | awk '/interface:/ {print $2}')
+    if [ -z "$dns" ]; then
+        dns_line="DNS: no resolver | color=red"
+    elif [ "$dns_if" = "$exit_u" ]; then
+        dns_line="DNS: ${dns}, through the tunnel | size=12"
+    elif [[ "$dns" == 127.* || "$dns" == ::1 ]]; then
+        dns_line="DNS: ${dns}, a local resolver | size=12"
+    elif [ "$dns_if" = lo0 ]; then
+        dns_line="DNS: ${dns} is blocked by the kill switch — names won't resolve | color=orange"
+    elif [ "$kind" = split ]; then
+        dns_line="DNS: ${dns} via ${dns_if:-?}, outside the tunnel (split tunnel) | size=12 color=gray"
+    else
+        dns_line="DNS: ${dns} via ${dns_if:-?} — outside the tunnel | color=red"
+    fi
+fi
 
 traffic=""
 if [ -n "$name" ]; then
-    xu=$(st warp | awk '{print $2}'); [ -n "$xu" ] || xu=$(st iface | awk '{print $2}')
+    xu="$exit_u"
     # The Link line has no Address column: Ibytes is $6, Obytes $9
     read -r rx tx < <(netstat -ibn -I "$xu" 2>/dev/null | awk '/<Link#/ {print $6, $9; exit}')
     if [ -n "$rx" ]; then
@@ -212,31 +284,63 @@ if [ -n "$name" ]; then
     fi
 fi
 
-if [ -n "$name" ] || [ -n "$apps" ]; then
-    echo " | sfimage=lock.fill sfcolor=#34C759"
-elif [ "$want" = up ]; then
-    echo " | sfimage=lock.fill sfcolor=#FF9500"
+# The icon: one shape and colour per state
+if [ -z "$fresh" ] && [ -z "$apps" ]; then
+    echo " | sfimage=exclamationmark.triangle.fill sfcolor=#FF3B30"
 else
-    echo " | sfimage=lock.open sfcolor=#8E8E93"
+    case "$state" in
+        up)           echo " | sfimage=lock.fill sfcolor=#34C759" ;;
+        connecting|reconnecting)
+                      echo " | sfimage=lock.rotation sfcolor=#FFCC00" ;;
+        blocked)      echo " | sfimage=lock.trianglebadge.exclamationmark.fill sfcolor=#FF9500" ;;
+        failed)       echo " | sfimage=lock.open.fill sfcolor=#FF3B30" ;;
+        paused)       echo " | sfimage=pause.circle.fill sfcolor=#0A84FF" ;;
+        *)            if [ -n "$apps" ]; then echo " | sfimage=lock.fill sfcolor=#34C759"
+                      else echo " | sfimage=lock.open sfcolor=#8E8E93"; fi ;;
+    esac
 fi
 
 echo "---"
-if [ -n "$name" ]; then
-    echo "${name} | color=green"
-    up=$(uptime_of); [ -n "$up" ] && echo "up ${up} | size=12"
-    [ -n "$exit_ip" ] && echo "${exit_ip} | size=12"
-    echo "${real_ip} | size=12 color=gray"
-    echo "handshake ${hs:-never}s ago | size=12"
-    [ -n "$warp_hs" ] && echo "WARP handshake ${warp_hs}s ago | size=12"
-    echo "kill switch: ${armed:-no} | size=12"
-    [ -n "$traffic" ] && while IFS= read -r l; do echo "${l} | size=12 font=Menlo"; done <<< "$traffic"
-elif [ "$want" = up ]; then
-    echo "Wanted: $(st desired | cut -d' ' -f2-) — not up | color=orange"
-    echo "kill switch: ${armed:-no} | size=12"
-else
-    echo "No tunnel"
-    echo "${real_ip} | size=12"
-fi
+case "$state" in
+    up|reconnecting)
+        if [ "$state" = up ]; then echo "${name} | color=green"
+        else echo "${name} — reconnecting: its exit went silent | color=orange"; fi
+        up=$(uptime_of); [ -n "$up" ] && echo "up ${up} | size=12"
+        [ -n "$exit_ip" ] && echo "${exit_ip} | size=12"
+        [ -n "$warp_line" ] && echo "$warp_line"
+        [ -n "$dns_line" ] && echo "$dns_line"
+        echo "${real_ip} | size=12 color=gray"
+        echo "handshake ${hs:-never}s ago | size=12"
+        [ -n "$warp_hs" ] && echo "WARP handshake ${warp_hs}s ago | size=12"
+        echo "kill switch: ${armed:-no} | size=12"
+        [ -n "$traffic" ] && while IFS= read -r l; do echo "${l} | size=12 font=Menlo"; done <<< "$traffic"
+        ;;
+    connecting)
+        echo "Connecting: ${sname} | color=orange"
+        step=$(last_step); [ -n "$step" ] && echo "${step} | size=12"
+        echo "kill switch: ${armed:-no} | size=12"
+        ;;
+    blocked)
+        echo "Blocked: ${sname} isn't up — the kill switch holds traffic | color=orange"
+        step=$(last_step); [ -n "$step" ] && echo "${step} | size=12"
+        echo "Behind a sign-in page? Pause Protection, below | size=12 color=gray"
+        ;;
+    failed)
+        echo "${sname} isn't up — split tunnel, so traffic goes out normally | color=red"
+        step=$(last_step); [ -n "$step" ] && echo "${step} | size=12"
+        echo "${real_ip} | size=12"
+        ;;
+    paused)
+        left=$(( (${suntil:-0} - $(date +%s) + 59) / 60 ))
+        echo "Paused: ${sname} | color=#0A84FF"
+        echo "back at $(date -r "${suntil:-0}" +%H:%M) (in ${left} min); no kill switch till then | size=12"
+        echo "${real_ip} | size=12"
+        ;;
+    *)
+        echo "No tunnel"
+        echo "${real_ip} | size=12"
+        ;;
+esac
 [ -n "$apps" ] && echo "WireGuard app: ${apps//,/, }"
 [ -z "$fresh" ] && echo "wg-tunnels daemon not answering | color=red"
 echo "---"
@@ -244,6 +348,15 @@ echo "Status | bash=$SELF param1=popup terminal=false"
 # Reconnect: the tunnel that's up, or the one wanted but not up
 again="${name:-$( [ "$want" = up ] && st desired | cut -d' ' -f2- )}"
 [ -n "$again" ] && echo "Reconnect | bash=$SELF param1=run param2=reconnect param3=$again terminal=false refresh=true"
+# Pause: the kill switch is on (or already paused, for a new end time)
+if [ "$armed" = yes ] || [ "$want" = pause ]; then
+    [ "$want" = pause ] && echo "Resume Now | bash=$SELF param1=run param2=resume terminal=false refresh=true"
+    [ "$want" = pause ] && echo "Pause For" || echo "Pause Protection"
+    for m in 5 15 60; do
+        [ "$m" = 60 ] && label="1 hour" || label="${m} minutes"
+        echo "--${label} | bash=$SELF param1=run param2=pause param3=$m terminal=false refresh=true"
+    done
+fi
 echo "Disconnect (Tunnel Down) | bash=$SELF param1=run param2=down terminal=false refresh=true"
 echo "Breakglass (Reset No Tunnel) | bash=$SELF param1=run param2=breakglass terminal=false refresh=true"
 echo "---"
@@ -268,6 +381,7 @@ echo "---"
 echo "More"
 echo "--Status in Terminal | bash=$TUNNEL param1=status terminal=true"
 echo "--Log | bash=$TUNNEL param1=log terminal=true"
+echo "--Export Diagnostics… | bash=$SELF param1=run param2=diag terminal=false"
 echo "--Rotate WARP Keys | bash=$SELF param1=run param2=rotate-warp terminal=false refresh=true"
 # The daemon is a copy of the repo's tunnel.sh: flag it when a git pull changed that
 if [ ! -x /usr/local/sbin/wg-tunnels ] || cmp -s "$TUNNEL" /usr/local/sbin/wg-tunnels; then
