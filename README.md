@@ -143,8 +143,8 @@ for 2.
 
 ## Your folders
 
-Everything lives in `~/wg-tunnels` (shared with wireguard-tools: see
-[Shared folder](#shared-folder)), split into devices and servers:
+Everything lives in `~/wg-tunnels` (optionally shared with wireguard-tools:
+see [Shared folder](#shared-folder)), split into devices and servers:
 
 ```
 ~/wg-tunnels/
@@ -175,7 +175,8 @@ this Mac's folder (or, with `--sing-box`, a first device's); `singbox.sh new
 
 ### Servers
 
-wireguard-tools makes a folder in `servers/` for each server it manages.
+Only if you use wireguard-tools: it makes a folder in `servers/` for each
+server it manages.
 This repo doesn't run servers; it only writes exits for them with
 [`nord.sh`](#nordvpn).
 
@@ -792,10 +793,13 @@ nord.sh server dengar us "new york"       # servers/dengar/carriers/nord.us.new-
 
 ## Shared folder
 
-`~/wg-tunnels` is shared with [wireguard-tools](https://github.com/cgmckeever/wireguard-tools),
-which runs the servers and delivers the client configs it issues. Both read
-its location from `$WG_TUNNELS` (default `~/wg-tunnels`; this README writes
-`~/wg-tunnels` for either). Set it in your shell profile before the first
+Optionally, `~/wg-tunnels` is shared with [wireguard-tools](https://github.com/cgmckeever/wireguard-tools),
+if you run your own servers with it; everything here works without it.
+wireguard-tools uses `servers/<server>/carriers/` for each server's exits
+(jumps), and puts the client configs it issues in `devices/<device>/config/`.
+
+Both read its location from `$WG_TUNNELS` (default `~/wg-tunnels`; this
+README writes `~/wg-tunnels` for either). Set it in your shell profile before the first
 `install.sh`. The menu bar doesn't read it, so its Rotate WARP Keys and
 Export Diagnostics only work with the default location.
 
