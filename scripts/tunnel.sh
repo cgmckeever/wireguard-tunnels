@@ -1192,10 +1192,11 @@ cmd_rotate_warp() {
     rm -rf "$old"
     echo "Old WARP account's files removed (Cloudflare isn't told)"
 
-    # A warped tunnel that's up still runs the old keys: reconnect it
+    # A warped tunnel, or WARP alone (warp.<device>), that's up still runs the
+    # old keys: reconnect it
     active=$(awk '$1 == "name" {print $2}' "$RUN/status" 2>/dev/null)
     kind=$(awk '$1 == "kind" {print $2}' "$RUN/status" 2>/dev/null)
-    if [ -n "$active" ] && [ "$kind" = warped ]; then
+    if [ -n "$active" ] && { [ "$kind" = warped ] || [ "$active" = "warp.$(basename "$(mac_dir)")" ]; }; then
         echo "== Reconnect ${active}"
         root request up "$active" || return 1
         follow "$(cat "$RUN/request")"
@@ -1411,9 +1412,11 @@ cmd_import() {
         src="$dir/config"
         # The repo's sweep, beside this script (the daemon's copy has none)
         sweep="$(dirname "$0")/wgwarp-sweep.sh"
-        if ls "$dir"/carriers/*.conf >/dev/null 2>&1; then
-            [ -x "$sweep" ] || die "Can't sweep $dir/carriers: no $sweep (run tunnel.sh from the repo)"
-            echo "Sweeping ${dir}/carriers into ${src}"
+        # Also with no carriers: it writes warp.<device>.conf from warp/ (new
+        # keys after rotate-warp, a new .warp-endpoint, back after extract)
+        if ls "$dir"/carriers/*.conf >/dev/null 2>&1 || [ -f "$dir/warp/wgcf-profile.conf" ]; then
+            [ -x "$sweep" ] || die "Can't sweep $dir: no $sweep (run tunnel.sh from the repo)"
+            echo "Sweeping ${dir} into ${src}"
             SWEEP_NO_NEXT=1 "$sweep" "$dir" || die "Sweep failed: nothing imported"
             echo
         fi

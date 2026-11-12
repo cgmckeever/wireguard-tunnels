@@ -373,7 +373,7 @@ fi
 
 echo
 echo "Done. Next:"
-echo "  put tunnel .conf files in $DEV_DIR/config (or carriers in $DEV_DIR/carriers, then $REPO/scripts/wgwarp-sweep.sh)"
-echo "  $REPO/scripts/tunnel.sh import"
+echo "  put tunnel .conf files in $DEV_DIR/config, and carriers in $DEV_DIR/carriers"
+echo "  $REPO/scripts/tunnel.sh import   (sweeps carriers/ first)"
 echo "  $REPO/scripts/tunnel.sh up"
 echo "  other devices (iPhone, Apple TV): $REPO/scripts/singbox.sh new <device>"

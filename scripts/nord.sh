@@ -266,8 +266,9 @@ note=""
 echo "$out: $state, $host, $place$note"
 
 echo
+here=$(cd "$(dirname "$0")" && pwd)
 case "$kind/$role" in
     server/*)       echo "Next: wgt-ctl $holder jump-add   (adds it to $holder as jump $code)" ;;
-    device/carrier) echo "Next: wgwarp-sweep.sh $holder, then tunnel.sh import (this Mac) or singbox.sh build $holder" ;;
-    device/config)  echo "Next: tunnel.sh import (this Mac), singbox.sh build $holder, or qr.sh $holder $name" ;;
+    device/carrier) echo "Next: $here/tunnel.sh import (this Mac; it sweeps carriers/ first) or $here/singbox.sh build $holder" ;;
+    device/config)  echo "Next: $here/tunnel.sh import (this Mac), $here/singbox.sh build $holder, or $here/qr.sh $holder $name" ;;
 esac
