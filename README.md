@@ -143,20 +143,26 @@ for 2.
 
 ## Your folders
 
-Every *device* (this Mac, an iPhone, an Apple TV) gets a folder on this Mac,
-in `~/wg-tunnels/devices/`, with its own keys and its own WARP account:
+Everything lives in `~/wg-tunnels` (shared with wireguard-tools: see
+[Shared folder](#shared-folder)), split into devices and servers:
 
 ```
-~/wg-tunnels/devices/
-  .default     this Mac's device name, e.g. mbp-1 (Local Mac Tunnels only)
-  mbp-1/       this Mac
-  iphone/      a sing-box device
+~/wg-tunnels/
+  devices/
+    .default     this Mac's device name, e.g. mbp-1 (Local Mac Tunnels only)
+    mbp-1/       this Mac
+    iphone/      a sing-box device
+  servers/
+    dengar/      a wireguard-tools server
 ```
 
-`install.sh` makes this Mac's folder (or, with `--sing-box`, a first
-device's); `singbox.sh new <device>` makes the others. Name each the way your
-configs name the device (wireguard-tools' `dengar.mbp-1.conf` belongs in
-`mbp-1/`). Inside each:
+### Devices
+
+Every *device* (this Mac, an iPhone, an Apple TV) gets a folder in
+`devices/`, with its own keys and its own WARP account. `install.sh` makes
+this Mac's folder (or, with `--sing-box`, a first device's); `singbox.sh new
+<device>` makes the others. Name each the way your configs name the device
+(wireguard-tools' `dengar.mbp-1.conf` belongs in `mbp-1/`). Inside each:
 
 | Folder | What goes there | Used by |
 |--------|-----------------|---------|
@@ -165,6 +171,17 @@ configs name the device (wireguard-tools' `dengar.mbp-1.conf` belongs in
 | `warp/` | The device's own WARP account (`wgcf-account.toml`, `wgcf-profile.conf`) | both |
 | `exports/` | Zips from the WireGuard app's *Export Tunnels to Zip…*, if you keep tunnels there ([extract](#tunnelsh)) | Local Mac Tunnels |
 | `sing-box/` | The sing-box profiles built from `config/`, to import in the app | Sing-Box Device Tunnels |
+| `.warp-endpoint` | This device's WARP endpoint, if it differs from the global one ([WARP endpoint](#warp-endpoint)) | both |
+
+### Servers
+
+wireguard-tools makes a folder in `servers/` for each server it manages.
+This repo doesn't run servers; it only writes exits for them with
+[`nord.sh`](#nordvpn).
+
+| Folder | What goes there | Used by |
+|--------|-----------------|---------|
+| `carriers/` | The server's exits (jumps), one `.conf` each, with a `# jump: <code> <label>` line ([Jumps](#shared-folder)) | wireguard-tools reads them; `nord.sh` writes the Nord ones |
 
 They're all `0700`: everything in `~/wg-tunnels` holds private keys. Nothing
 here sends them anywhere; only the sing-box profiles you send yourself leave
@@ -787,10 +804,17 @@ $WG_TUNNELS/
   .warp-endpoint                    WARP endpoint for every device (optional)
   .nord-token                       NordVPN access token, for nord.sh (optional)
   diag/                             tunnel.sh diag output (keys removed)
-  servers/<server>/carriers/        a server's exits (jumps), one .conf each
-  devices/<device>/config/          the device's tunnels
-  devices/<device>/carriers/ warp/ exports/ sing-box/ .warp-endpoint
+  devices/
+    .default                        this Mac's device name
+    <device>/
+      config/                       the device's tunnels
+      carriers/ warp/ exports/ sing-box/ .warp-endpoint
+  servers/
+    <server>/
+      carriers/                     the server's exits (jumps), one .conf each
 ```
+
+See [Devices](#devices) and [Servers](#servers) for what goes in each.
 
 | Folder | Made by | Notes |
 |--------|---------|-------|
