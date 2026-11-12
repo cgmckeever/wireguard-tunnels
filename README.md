@@ -186,12 +186,12 @@ already there alone.
 
 ### Servers
 
-`servers/` is wireguard-tools': it makes one folder per server it manages,
-each with a `carriers/` folder (even if empty) holding that server's exits
-(jumps), one `.conf` each. This repo runs no servers. The only thing here
-that touches `servers/` is [`nord.sh`](#nordvpn), which writes Nord exits
-into a server's `carriers/`, each with the `# jump:` line wireguard-tools
-needs ([Jumps](#shared-folder)).
+Each server gets a folder in `servers/`, with a `carriers/` folder for that
+server's exit configs (jumps), one `.conf` each. Set them up here, by hand
+(a config from your VPN provider, plus a `# jump: <code> <label>` line; see
+[Jumps](#shared-folder)) or with [`nord.sh`](#nordvpn), which writes the jump
+line for you. wireguard-tools uses them: it makes a folder for each server
+it manages and reads its exits from `carriers/`.
 
 ### Keys
 
