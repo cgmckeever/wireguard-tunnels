@@ -97,7 +97,8 @@ STATE="$ETC/state"                     # desired (up <name> | down | pause <name
 WARP_SRC="$PREFIX/etc/wireguard/warp.conf"  # written by install.sh
 WG_RUN="${WGT_WG_RUN:-/var/run/wireguard}"  # wg-quick's <iface>.name -> utunN
 
-TUNNELS="$HOME/wg-tunnels/devices"      # one folder per device
+WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
+TUNNELS="$WG_TUNNELS/devices"          # one folder per device
 DEFAULT_FILE="$TUNNELS/.default"        # this Mac's device: one line, its folder name
 WAIT_SECS=30
 WATCH_SECS=30
@@ -128,7 +129,7 @@ need_root() {
 
 # --- this Mac's device folder ---
 
-# devices: the device folders in ~/wg-tunnels, one per line
+# devices: the device folders in $WG_TUNNELS/devices, one per line
 devices() {
     local d
     for d in "$TUNNELS"/*/; do
@@ -137,7 +138,7 @@ devices() {
 }
 
 # default [device]: show or pick this Mac's device folder, saved in
-# ~/wg-tunnels/devices/.default. Changing it leaves the daemon's tunnels alone.
+# $WG_TUNNELS/devices/.default. Changing it leaves the daemon's tunnels alone.
 cmd_default() {
     local cur pick answer i devs=()
     cur=$(cat "$DEFAULT_FILE" 2>/dev/null)
@@ -876,10 +877,11 @@ EOF
 
 # DNS values from every tunnel config (wg-quick sets these on every network
 # service and only puts the old ones back on a clean `down`)
+# $1: the user's $WG_TUNNELS (sudo drops the environment), else ~user/wg-tunnels
 tunnel_dns() {
-    local f home
-    home=$(eval echo "~${SUDO_USER:-root}")
-    for f in "$WARP_SRC" "$CONF"/*.conf "$home"/wg-tunnels/devices/*/{warp,config,carriers}/*.conf; do
+    local f store
+    store="${1:-$(eval echo "~${SUDO_USER:-root}")/wg-tunnels}"
+    for f in "$WARP_SRC" "$CONF"/*.conf "$store"/devices/*/{warp,config,carriers}/*.conf; do
         [ -f "$f" ] || continue
         awk -F'[[:space:]]*=[[:space:]]*' 'tolower($1) ~ /^[[:space:]]*dns$/ {print $2}' "$f"
     done | tr ', ' '\n\n' | grep . | sort -u
@@ -922,7 +924,7 @@ cmd_breakglass_root() {
     done
 
     echo "== dns"
-    known=$(tunnel_dns)
+    known=$(tunnel_dns "$1")
     while IFS= read -r svc; do
         [ -n "$svc" ] || continue
         dns=$(networksetup -getdnsservers "$svc" 2>/dev/null | grep -E '^[0-9a-fA-F.:]+$')
@@ -1236,7 +1238,7 @@ cmd_resume() {
 # diag [file]: everything needed to debug, in one file, keys removed. Runs the
 # repo's copy as root (works when the daemon is broken); the file is yours.
 cmd_diag() {
-    local out="${1:-$HOME/wg-tunnels/diag/diag-$(date +%Y%m%d-%H%M%S).txt}"
+    local out="${1:-$WG_TUNNELS/diag/diag-$(date +%Y%m%d-%H%M%S).txt}"
     mkdir -p "$(dirname "$out")" || die "diag: can't make $(dirname "$out")"
     sudo "$0" _diag > "$out" || { rm -f "$out"; die "diag: failed"; }
     echo "$out"
@@ -1292,7 +1294,7 @@ cmd_breakglass() {
     echo "Breakglass: stop every tunnel and put the normal connection back"
     stop_app_tunnels
     # The repo copy, not the installed one: works when that's missing or broken
-    sudo "$0" _breakglass
+    sudo "$0" _breakglass "$WG_TUNNELS"
 }
 
 cmd_down() {
@@ -1348,7 +1350,9 @@ status() {
 
 # extract [zip]: the newest export zip in this Mac's exports/ (or the one
 # given) becomes its config/. The zip is the authority: every .conf in config/
-# is replaced, and ones not in the zip are removed. The zip is kept.
+# is replaced, and ones not in the zip are removed. The zip is kept. Configs
+# wireguard-tools issued ("# wireguard-tools client:" line) are left alone:
+# they're wgt-ctl's to replace, and the app's export drops that line.
 cmd_extract() {
     local zip="${1:-}" tmp f name n=0 dir EXPORTS CONFIGS
     dir=$(mac_dir) || exit 1
@@ -1368,7 +1372,9 @@ cmd_extract() {
     echo "Extracting ${zip} into ${CONFIGS}"
     for f in "$tmp"/*.conf; do
         name=$(basename "$f")
-        if [ ! -f "$CONFIGS/$name" ]; then echo "  ${name%.conf}: new"
+        if [ -f "$CONFIGS/$name" ] && grep -q '^# wireguard-tools client:' "$CONFIGS/$name"; then
+            echo "  ${name%.conf}: kept (wireguard-tools' copy)"; rm -f "$f"
+        elif [ ! -f "$CONFIGS/$name" ]; then echo "  ${name%.conf}: new"
         elif cmp -s "$f" "$CONFIGS/$name"; then echo "  ${name%.conf}: unchanged"
         else echo "  ${name%.conf}: updated"; fi
     done
@@ -1376,12 +1382,15 @@ cmd_extract() {
         [ -f "$f" ] || continue
         name=$(basename "$f")
         [ -f "$tmp/$name" ] && continue
+        grep -q '^# wireguard-tools client:' "$f" && continue
         echo "  ${name%.conf}: removed (not in the zip)"
         rm -f "$f"
     done
-    chmod 600 "$tmp"/*.conf
     # Over the old ones: if this fails, the zip's configs are still in $tmp
-    mv -f "$tmp"/*.conf "$CONFIGS"/ || die "Can't move the configs into ${CONFIGS} (they're in ${tmp})"
+    if compgen -G "$tmp/*.conf" >/dev/null; then
+        chmod 600 "$tmp"/*.conf
+        mv -f "$tmp"/*.conf "$CONFIGS"/ || die "Can't move the configs into ${CONFIGS} (they're in ${tmp})"
+    fi
     rm -rf "$tmp"
 }
 
@@ -1453,7 +1462,7 @@ case "${1:-status}" in
     _import)   cmd_import_root "$2" "$3" "$4" ;;
     _install)  cmd_install_root "$2" ;;
     _uninstall) cmd_uninstall_root ;;
-    _breakglass) cmd_breakglass_root ;;
+    _breakglass) cmd_breakglass_root "$2" ;;
     _diag)     cmd_diag_root ;;
     *) usage >&2; exit 1 ;;
 esac

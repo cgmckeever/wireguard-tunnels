@@ -18,7 +18,8 @@
 
 die() { echo "qr.sh: $*" >&2; exit 1; }
 
-TUNNELS_DIR="$HOME/wg-tunnels/devices"
+WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
+TUNNELS_DIR="$WG_TUNNELS/devices"
 MAC=$(cat "$TUNNELS_DIR/.default" 2>/dev/null)     # this Mac's device
 
 case "$1" in -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;; esac

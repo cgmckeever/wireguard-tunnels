@@ -176,6 +176,47 @@ WARP keys work the same way, which is why each device has its own WARP
 account: `install.sh` registers this Mac's, `singbox.sh new` each other
 device's.
 
+### Shared folder
+
+`~/wg-tunnels` is shared with [wireguard-tools](https://github.com/cgmckeever/wireguard-tools),
+which runs the servers and delivers the client configs it issues. Both read
+its location from `$WG_TUNNELS` (default `~/wg-tunnels`). Set it in your shell
+profile; the menu bar doesn't see your shell, so it only works with the default.
+
+```
+$WG_TUNNELS/
+  .warp-endpoint                    WARP endpoint for every device (optional)
+  servers/<server>/carriers/        a server's exits (jumps), one .conf each
+  devices/<device>/config/          the device's tunnels
+  devices/<device>/carriers/ warp/ exports/ sing-box/ .warp-endpoint
+```
+
+| Folder | Made by | Notes |
+|--------|---------|-------|
+| `$WG_TUNNELS` | wireguard-tools or this repo, whichever runs first | `0700` |
+| `servers/<server>/carriers/` | wireguard-tools, one per server it manages (even empty) | wireguard-tools reads the jump files here; nothing in this repo lists, sweeps or imports them |
+| `devices/<device>/config/` | wireguard-tools, when it delivers a config; or this repo | Both write here, under the rules below |
+| everything else under `devices/<device>/` | this repo | |
+
+A device folder with only `config/` is a normal device with plain configs:
+the sweep has nothing to do, `import` and `build` use the configs as they are
+(`build` makes no WARP tunnel without `warp/`), and `singbox.sh new <device>`
+adds `carriers/` and `warp/` without touching `config/`.
+
+**Configs wireguard-tools issued** start with
+`# wireguard-tools client: <config> on <server>`. They're wgt-ctl's to
+replace: the live copy is on the server, and `wgt-ctl sync` puts it back.
+Nothing here changes, renames or deletes one. `tunnel.sh extract` leaves them
+in place (the WireGuard app's export drops that line), and the sweep stops
+rather than write a warped tunnel over one.
+
+**Backups.** When wgt-ctl replaces or removes a config, the old one becomes
+`<name>.conf.<time>.bak`. Everything here reads only `*.conf`, so backups are
+never listed, imported or built. Delete them when you no longer need them.
+
+**Jumps.** A file in `servers/<server>/carriers/` names its jump in a
+`# jump: <code> <label>` line.
+
 ## Warped tunnels
 
 A warped tunnel starts as a carrier: an ordinary WireGuard config from your
@@ -267,7 +308,8 @@ then, this Mac skips warped tunnels whose endpoint doesn't match its WARP
 config.
 
 One device can have its own: `~/wg-tunnels/devices/<device>/.warp-endpoint`,
-same format, read before the shared file by the sweep and `singbox.sh build`.
+same format, read before the shared file by the sweep, `singbox.sh build` and
+`install.sh` (for this Mac's WARP config).
 It's for a device whose own WARP would otherwise catch other devices' WARP: a
 router running WARP on `162.159.192.1` keeps a route to it out its WAN, so a
 Mac behind it that also uses `.1` has its WARP packets sent past the router's
@@ -648,7 +690,8 @@ numeric `MTU` if one is set.
 **Warped tunnels.** `build` runs the [sweep](#warped-tunnels) on the device's
 `carriers/` first (`scripts/wgwarp-sweep.sh <device>` shows the same report on
 its own). It skips a `warped.*` file whose carrier is missing from
-`carriers/` or broken, so orphans drop out of the profiles.
+`carriers/` or broken, so orphans drop out of the profiles. A device with no
+`warp/` (only configs from wireguard-tools, say) gets its plain tunnels only.
 
 **Keys.** `build` stops on a key shared with another device, and names the
 files (never the key); see [Keys](#keys). A key used twice on one device (a

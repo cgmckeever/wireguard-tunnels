@@ -38,7 +38,8 @@
 
 die() { echo "wgwarp-sweep.sh: $*" >&2; exit 1; }
 
-TUNNELS="$HOME/wg-tunnels/devices"
+WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
+TUNNELS="$WG_TUNNELS/devices"
 MAC=$(cat "$TUNNELS/.default" 2>/dev/null)     # this Mac's device (tunnel.sh default)
 [ $# -le 1 ] || die "usage: wgwarp-sweep.sh [<device>|<dir>]"
 case "$1" in
@@ -50,9 +51,16 @@ case "$1" in
     *)  DIR="$TUNNELS/$1"; [ -d "$DIR" ] || DIR="$1" ;;
 esac
 [ -d "$DIR" ] || die "no folder $DIR"
-# Only a device folder gets swept: never make carriers/ and config/ (and chmod
-# 700) in some other folder that was named by mistake
-[ -d "$DIR/carriers" ] || die "no carriers/ in $DIR (singbox.sh new <device> makes a device)"
+NO_CARRIERS=""
+# Only a device folder gets swept: never make config/ (and chmod 700) in some
+# other folder that was named by mistake. A folder under devices/ with no
+# carriers/ is a device with plain configs only (wireguard-tools makes those):
+# nothing to sweep, and carriers/ isn't made for it.
+if [ ! -d "$DIR/carriers" ]; then
+    [ "$(cd "$DIR/.." && pwd -P)" = "$(cd "$TUNNELS" 2>/dev/null && pwd -P)" ] \
+        || die "no carriers/ in $DIR (singbox.sh new <device> makes a device)"
+    NO_CARRIERS=1
+fi
 # The WireGuard app column: this Mac's device only, and not for singbox.sh
 APP=""
 [ -z "$SWEEP_FOR_SINGBOX" ] && [ -n "$MAC" ] && [ -d "$TUNNELS/$MAC" ] \
@@ -65,7 +73,7 @@ CONFIG_DIR="$DIR/config"
 # network routes the shared address elsewhere (a router whose own WARP holds a
 # route to it). singbox.sh reads them the same way.
 WARP_ENDPOINT=162.159.192.1:2408 EP_FILE=""
-for f in "$DIR/.warp-endpoint" "$HOME/wg-tunnels/.warp-endpoint"; do
+for f in "$DIR/.warp-endpoint" "$WG_TUNNELS/.warp-endpoint"; do
     [ -f "$f" ] && { EP_FILE="$f"; WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$f"); break; }
 done
 [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
@@ -75,7 +83,8 @@ WARP_NET="${WARP_ENDPOINT%:*}/32"
 # These hold private keys
 umask 077
 mkdir -p "$CONFIG_DIR" || die "can't create $CONFIG_DIR"
-chmod 700 "$DIR" "$CARRIER_DIR" "$CONFIG_DIR"
+chmod 700 "$DIR" "$CONFIG_DIR"
+[ -n "$NO_CARRIERS" ] || chmod 700 "$CARRIER_DIR"
 
 # warped_name <carrier file> <device>: the tunnel it becomes, the device always
 # last: x.conf, warped.x.conf and warped-x.conf all become warped.x.<device>,
@@ -160,6 +169,9 @@ render() {
     ' "$1"
 }
 
+# tools_issued <conf>: wireguard-tools delivered it; only wgt-ctl replaces it
+tools_issued() { grep -q '^# wireguard-tools client:' "$1"; }
+
 endpoint_of() {
     awk -F'[[:space:]]*=[[:space:]]*' 'tolower($0) ~ /^[[:space:]]*endpoint[[:space:]]*=/ {print $2; exit}' "$1"
 }
@@ -190,8 +202,12 @@ app_action() {
 }
 
 # place <tmp> <out>: move tmp into place unless out already says the same;
-# prints new, updated or unchanged
+# prints new, updated or unchanged. A config wireguard-tools issued (its
+# "# wireguard-tools client:" line) is never replaced: it stops instead.
 place() {
+    if [ -f "$2" ] && tools_issued "$2"; then
+        rm -f "$1"; die "$(basename "$2") was issued by wireguard-tools: not replacing it (rename the carrier)"
+    fi
     if [ -f "$2" ] && cmp -s "$1" "$2"; then rm -f "$1"; echo unchanged; return; fi
     local state=new; [ -f "$2" ] && state=updated
     mv "$1" "$2" || { rm -f "$1"; die "can't write $2"; }
@@ -204,7 +220,10 @@ list() { paste -sd, - | sed 's/,/, /g'; }
 
 shopt -s nullglob
 raws=("$CARRIER_DIR"/*.conf)
-if [ ${#raws[@]} -eq 0 ]; then
+if [ -n "$NO_CARRIERS" ]; then
+    echo "No carriers/ in ${DIR}: plain configs only (singbox.sh new $DEVICE adds carriers/)"
+    echo
+elif [ ${#raws[@]} -eq 0 ]; then
     echo "No configs in ${CARRIER_DIR}: put WireGuard configs there (x.conf becomes warped.x.$DEVICE)"
     echo
 fi

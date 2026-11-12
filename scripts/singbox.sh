@@ -39,7 +39,8 @@
 # ~/wg-tunnels/.warp-endpoint (IPv4:port; default 162.159.192.1:2408).
 
 set -o pipefail
-TUNNELS_DIR="$HOME/wg-tunnels/devices"
+WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
+TUNNELS_DIR="$WG_TUNNELS/devices"
 MAC=$(cat "$TUNNELS_DIR/.default" 2>/dev/null)     # this Mac's device
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
@@ -52,7 +53,7 @@ die() { echo "singbox.sh: $*" >&2; exit 1; }
 warp_endpoint() {
     local f src=""
     WARP_ENDPOINT=162.159.192.1:2408
-    for f in "$1/.warp-endpoint" "$HOME/wg-tunnels/.warp-endpoint"; do
+    for f in "$1/.warp-endpoint" "$WG_TUNNELS/.warp-endpoint"; do
         [ -f "$f" ] && { src="$f"; WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$f"); break; }
     done
     [[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
@@ -414,11 +415,17 @@ cmd_build() {
     [ -d "$dir" ] || die "no device $dir ($setup)"
     command -v jq >/dev/null || die "jq missing (install.sh --sing-box, or brew install jq)"
     profile="$dir/warp/wgcf-profile.conf"
-    [ -f "$profile" ] || die "no WARP profile in $dir/warp ($setup)"
-    why=$(unusable "$profile"); [ -z "$why" ] || die "WARP profile $profile: $why"
+    if [ -f "$profile" ]; then
+        why=$(unusable "$profile"); [ -z "$why" ] || die "WARP profile $profile: $why"
+    else
+        # A device with only config/ (wireguard-tools delivers those): its
+        # plain tunnels, no WARP
+        echo "No WARP profile in $dir/warp: plain tunnels only ($setup adds WARP)"
+        profile=""
+    fi
     warp_endpoint "$dir"
 
-    echo "== Sweep $dir/carriers"
+    echo "== Sweep $dir"
     SWEEP_FOR_SINGBOX=1 "$HERE/wgwarp-sweep.sh" "$dir" || die "sweep failed"
     echo
 
@@ -442,6 +449,7 @@ cmd_build() {
         cmtu=$(conf_val "$conf" MTU); cmtu="${cmtu:-1420}"
         case "$tag" in
             warped.*)
+                [ -n "$profile" ] || { echo "skipped $tag: no WARP profile"; continue; }
                 case "$carrier_names" in
                     *" $tag "*) add_warped "$conf" "$tag" "$cmtu" "$profile" ;;
                     *) echo "skipped $tag: no usable carrier for it in carriers/ (delete it if that's for good)"; continue ;;
@@ -451,8 +459,8 @@ cmd_build() {
         used+=("$conf")
     done
     [ ${#tags[@]} -gt 0 ] || die "nothing to build: put configs in $dir/carriers or $dir/config"
-    add_warp "$profile" "$name"
-    check_keys "$dir" "${used[@]}" "$profile"
+    [ -z "$profile" ] || add_warp "$profile" "$name"
+    check_keys "$dir" "${used[@]}" ${profile:+"$profile"}
     check_tags "$name"
 
     out="$dir/sing-box"

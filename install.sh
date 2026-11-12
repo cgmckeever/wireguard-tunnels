@@ -34,13 +34,14 @@
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
 #                 without --sing-box to add Local Mac Tunnels later
 #
-# The WARP endpoint comes from ~/wg-tunnels/.warp-endpoint (IPv4:port; default
-# 162.159.192.1:2408).
+# The WARP endpoint comes from ~/wg-tunnels/devices/<device>/.warp-endpoint,
+# else ~/wg-tunnels/.warp-endpoint (IPv4:port; default 162.159.192.1:2408).
 
 set -u
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
-TUNNELS_DIR="$HOME/wg-tunnels"
+WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
+TUNNELS_DIR="$WG_TUNNELS"
 DEVICES="$TUNNELS_DIR/devices"         # one folder per device
 DEFAULT_FILE="$DEVICES/.default"       # this Mac's device (tunnel.sh default)
 INSTALLED="/usr/local/sbin/wg-tunnels"
@@ -84,12 +85,6 @@ if [ "$opts" = 0 ] && [ -t 0 ] && [ ! -f "$DEFAULT_FILE" ]; then
 fi
 [ "$singbox_only" = 0 ] || { [ "$swiftbar" = 0 ] && [ "$daemon" = 1 ]; } \
     || die "--sing-box takes only --device: it sets up no Local Mac Tunnels"
-# The WARP endpoint: ~/wg-tunnels/.warp-endpoint (one line, IPv4:port), else
-# Cloudflare's default. A file, not a variable, so the menu bar sees it too.
-WARP_ENDPOINT=162.159.192.1:2408
-[ -f "$TUNNELS_DIR/.warp-endpoint" ] && WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$TUNNELS_DIR/.warp-endpoint")
-[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
-    || die "~/wg-tunnels/.warp-endpoint: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
 [ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
 
 echo "== Homebrew"
@@ -164,6 +159,15 @@ if [ ! -d "$DEVICES/$device" ] && [ -n "$existing" ] && [ -t 0 ]; then
 fi
 DEV_DIR="$DEVICES/$device"
 WARP_DIR="$DEV_DIR/warp"
+# The WARP endpoint: <device>/.warp-endpoint, else ~/wg-tunnels/.warp-endpoint
+# (one line, IPv4:port), else Cloudflare's default. Files, not a variable, so
+# the sweep and singbox.sh read the same ones.
+WARP_ENDPOINT=162.159.192.1:2408 ep_file=""
+for f in "$DEV_DIR/.warp-endpoint" "$TUNNELS_DIR/.warp-endpoint"; do
+    [ -f "$f" ] && { ep_file="$f"; WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$f"); break; }
+done
+[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
+    || die "${ep_file}: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
 
 umask 077    # until warp.conf is written: everything here holds private keys
 # 0700: everything under ~/wg-tunnels holds private keys
