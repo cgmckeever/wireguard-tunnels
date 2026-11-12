@@ -176,6 +176,10 @@ WARP keys work the same way, which is why each device has its own WARP
 account: `install.sh` registers this Mac's, `singbox.sh new` each other
 device's.
 
+Nord is the exception: it gives one key per account, so every
+[Nord config](#nordvpn) shares it. `nord.sh` keeps each on a Nord server of its
+own instead, and `build` doesn't count Nord's key as shared.
+
 ### Shared folder
 
 `~/wg-tunnels` is shared with [wireguard-tools](https://github.com/cgmckeever/wireguard-tools),
@@ -194,7 +198,7 @@ $WG_TUNNELS/
 | Folder | Made by | Notes |
 |--------|---------|-------|
 | `$WG_TUNNELS` | wireguard-tools or this repo, whichever runs first | `0700` |
-| `servers/<server>/carriers/` | wireguard-tools, one per server it manages (even empty) | wireguard-tools reads the jump files here; nothing in this repo lists, sweeps or imports them |
+| `servers/<server>/carriers/` | wireguard-tools, one per server it manages (even empty) | wireguard-tools reads the jump files here; `nord.sh` writes Nord ones; nothing in this repo lists, sweeps or imports them |
 | `devices/<device>/config/` | wireguard-tools, when it delivers a config; or this repo | Both write here, under the rules below |
 | everything else under `devices/<device>/` | this repo | |
 
@@ -216,6 +220,42 @@ never listed, imported or built. Delete them when you no longer need them.
 
 **Jumps.** A file in `servers/<server>/carriers/` names its jump in a
 `# jump: <code> <label>` line.
+
+### NordVPN
+
+`scripts/nord.sh` makes NordLynx (WireGuard) configs from your Nord account.
+Put the access token (Nord account > NordVPN > Manual setup) in
+`~/wg-tunnels/.nord-token`, one line; it's never an argument. Run it with no
+arguments and it asks: a device or a server, which one, carrier or config (a
+device only), the country, then a numbered list of that country's cities
+(Enter = any: Nord's pick in the whole country). Nord has cities, not states
+or regions; in the US that's about one per state (Hawaii is Honolulu).
+
+```
+nord.sh                                   # asks
+nord.sh device mbp-1 carrier us           # devices/mbp-1/carriers/nord.us.conf -> warped.nord.us.mbp-1
+nord.sh device iphone config ca           # devices/iphone/config/nord.ca.conf: a plain tunnel
+nord.sh server dengar us                  # servers/dengar/carriers/nord.us.conf: jump nd-us
+nord.sh device mbp-1 config us honolulu   # devices/mbp-1/config/nord.us.honolulu.conf
+nord.sh server dengar us "new york"       # servers/dengar/carriers/nord.us.new-york.conf: jump new-us
+```
+
+- **One file per holder and place** (a country, or a city in it). Running it
+  again regenerates that file, keeping its Nord server while Nord still
+  recommends it. A device can have both a carrier and a config for one place. Only files with a
+  `# source: nord` line are regenerated; another file of the same name is
+  left alone.
+- **One Nord server per file.** Every Nord config shares the account's key: on
+  two Nord servers at once that works, twice on one server both break. So a
+  server any other Nord file uses (any device or server) is skipped for the
+  next one Nord recommends.
+- **Servers** get a `# jump: <code> <city, country> (Nord <server>)` line, so
+  `wgt-ctl <server> jump-add` adds it under that code: `nd-<cc>` for any city,
+  or the city's first three letters and the country (`hon-us`) the way wgt-ctl
+  names jumps, with a digit if that code is taken (`new-us`, `ne2-us`). Nord's
+  own server names, like `us11553`, are too long for a jump code.
+- Nord recommends servers near the Mac that runs `nord.sh`, not near the
+  holder: for a server elsewhere, the country is what you choose.
 
 ## Warped tunnels
 

@@ -260,11 +260,14 @@ add_warp() {
 
 # --- checks before writing ---
 
-# key_lines <file>...: "<key><TAB><file>" for every file with a PrivateKey
+# key_lines <file>...: "<key><TAB><file>" for every file with a PrivateKey.
+# Not Nord's (nord.sh, "# source: nord"): Nord gives one key per account, so
+# they all share it; nord.sh keeps each on its own Nord server instead.
 key_lines() {
     local f k
     for f in "$@"; do
         [ -f "$f" ] || continue
+        grep -q '^# source: nord' "$f" && continue
         k=$(conf_val "$f" PrivateKey)
         [ -n "$k" ] && printf '%s\t%s\n' "$k" "${f#"$TUNNELS_DIR"/}"
     done
