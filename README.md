@@ -111,7 +111,17 @@ On your Mac (macOS and [Homebrew](https://brew.sh) needed):
 3. **Add tunnels:** [Mac quick start](#mac-quick-start) or
    [sing-box quick start](#sing-box-quick-start).
 
-The scripts run by path. Aliases make that shorter, e.g. in `~/.zshrc`:
+The scripts run by path. `scripts/wgtun.sh` is one entry point for them:
+with no arguments it lists them, each with what it does, and asks which to
+run; `wgtun.sh <script> [args]` runs one (`wgtun.sh tunnel up`,
+`wgtun.sh nord`), and `wgtun.sh <script> -h` shows its commands. One alias
+covers it, e.g. in `~/.zshrc`:
+
+```sh
+alias wgtun=~/Documents/code/wireguard-tunnels/scripts/wgtun.sh
+```
+
+Or alias each script directly:
 
 ```sh
 alias tunnel=~/Documents/code/wireguard-tunnels/scripts/tunnel.sh
