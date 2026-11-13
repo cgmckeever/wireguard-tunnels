@@ -108,8 +108,24 @@ On your Mac (macOS and [Homebrew](https://brew.sh) needed):
    Mac's device name (`mbp-1`, say), 2 for a first device (`iphone`, say).
    To keep them somewhere other than `~/wg-tunnels`, set `WG_TUNNELS` in your
    shell profile first ([Your folders](#your-folders)).
-3. **Add tunnels:** [Mac quick start](#mac-quick-start) or
-   [sing-box quick start](#sing-box-quick-start).
+3. **Add your WireGuard configs.** The `.conf` files you download from
+   your VPN provider or server go in the device's folder, in one of two
+   places:
+   ```
+   ~/wg-tunnels/devices/mbp-1/
+     config/     plain tunnels: each .conf is used as it is
+     carriers/   carriers: processed into warped tunnels (WARP inside)
+   ```
+   A config in `carriers/` isn't used as it is: `tunnel.sh import` and
+   `singbox.sh build` process it into a warped tunnel,
+   `config/warped.<name>.<device>.conf`, which is the one you run. Not sure
+   which? Use `config/`. Each device needs configs made for it,
+   not copies of another device's ([Keys](#keys)).
+4. **Use them.**
+   - This Mac: `tunnel.sh import`, then `tunnel.sh up`
+     ([Mac quick start](#mac-quick-start)).
+   - A phone or Apple TV: `singbox.sh build <device>`, then open the profile
+     in the sing-box app ([sing-box quick start](#sing-box-quick-start)).
 
 The scripts run by path. `scripts/wgtun.sh` is one entry point for them:
 with no arguments it lists them, each with what it does, and asks which to
@@ -338,8 +354,9 @@ menu bar lock.
 
 After `./install.sh`, with `<mac>` the device name it asked for:
 
-1. **Add configs** to `~/wg-tunnels/devices/<mac>/`: carriers in `carriers/`
-   (they become warped tunnels), plain tunnels in `config/`.
+1. **Add your configs** (the `.conf` files from your provider or server)
+   to `~/wg-tunnels/devices/<mac>/`: plain tunnels in `config/`, carriers
+   in `carriers/` (the next step processes them into warped tunnels).
 2. **Import** them for the daemon. It shows what will change and asks first:
    ```sh
    tunnel.sh import
@@ -594,9 +611,11 @@ sing-box.
 After `./install.sh` (choice 2), with `iphone` the device it asked for (no
 device yet, or another one? `singbox.sh new <device>` first):
 
-1. **Add its configs** to `~/wg-tunnels/devices/iphone/`: carriers in
-   `carriers/` (they become warped tunnels), plain full tunnels in `config/`.
-   At least one, each a new config made for this device ([Keys](#keys)).
+1. **Add its configs** (the `.conf` files from your provider or server)
+   to `~/wg-tunnels/devices/iphone/`: plain full tunnels in `config/`,
+   carriers in `carriers/` (the next step processes them into warped
+   tunnels). At least one, each a
+   new config made for this device ([Keys](#keys)).
 2. **Build its profiles** into `~/wg-tunnels/devices/iphone/sing-box/`:
    ```sh
    singbox.sh build iphone
