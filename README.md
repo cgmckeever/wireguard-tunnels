@@ -47,7 +47,12 @@ addresses; for those, use a plain tunnel to the carrier's server (a second
 config from the provider, with its own key).
 
 For the server side (a WireGuard server that exits through WARP itself), see
-[wireguard-tools](https://github.com/cgmckeever/wireguard-tools).
+[wireguard-tools](https://github.com/cgmckeever/wireguard-tools), a separate
+repo (not the Homebrew package of the same name, which `install.sh` installs
+for `wg` and `wg-quick`). It's optional: everything here works without it. If
+you use it, the two share one folder: its client configs land with your
+devices' configs, and this repo can set up its servers' exits
+([Servers](#servers)).
 
 ## Two ways to run it
 
@@ -102,7 +107,7 @@ On your Mac (macOS and [Homebrew](https://brew.sh) needed):
    Both make your folders ([Your folders](#your-folders)): 1 asks for this
    Mac's device name (`mbp-1`, say), 2 for a first device (`iphone`, say).
    To keep them somewhere other than `~/wg-tunnels`, set `WG_TUNNELS` in your
-   shell profile first ([Shared folder](#shared-folder)).
+   shell profile first ([Your folders](#your-folders)).
 3. **Add tunnels:** [Mac quick start](#mac-quick-start) or
    [sing-box quick start](#sing-box-quick-start).
 
@@ -147,6 +152,16 @@ Everything lives in `~/wg-tunnels`, and its folders are all `0700`: they
 hold private keys. Nothing here sends them anywhere; only the sing-box
 profiles you send yourself leave the Mac.
 
+To keep it elsewhere, set `$WG_TUNNELS` in your shell profile before the
+first `install.sh`; every script here (and wireguard-tools) reads it. This
+README writes `~/wg-tunnels` either way. The
+[menu bar lock](#menu-bar-optional) doesn't read it, so its Rotate WARP Keys
+and Export Diagnostics only work with the default location.
+
+It holds two kinds of folder: `devices/`, one per device that runs tunnels,
+and, only if you use wireguard-tools, `servers/`, one per server it runs,
+holding that server's exits.
+
 ```
 ~/wg-tunnels/
   .warp-endpoint   WARP endpoint for every device (optional)
@@ -186,12 +201,20 @@ already there alone.
 
 ### Servers
 
-Each server gets a folder in `servers/`, with a `carriers/` folder for that
-server's exit configs (jumps), one `.conf` each. Set them up here, by hand
-(a config from your VPN provider, plus a `# jump: <code> <label>` line; see
-[Jumps](#shared-folder)) or with [`nord.sh`](#nordvpn), which writes the jump
-line for you. wireguard-tools uses them: it makes a folder for each server
-it manages and reads its exits from `carriers/`.
+Only with wireguard-tools; skip this otherwise. It makes a folder in
+`servers/` for each server it manages, with a `carriers/` folder for that
+server's exits (wireguard-tools calls them *jumps*), one `.conf` each, and
+reads the exits from there. They're never tunnels on your devices.
+
+You can set them up here, by hand or with [`nord.sh`](#nordvpn). By hand,
+save a config from your VPN provider and give it a line naming its jump:
+
+```ini
+# jump: <code> <label>
+```
+
+`nord.sh` writes that line for you. Then `wgt-ctl <server> jump-add` adds the
+exit to the server under that code.
 
 ### Keys
 
@@ -252,13 +275,12 @@ device the server, unless that address is in `AllowedIPs` too. The sweep adds
 these *extras* from two kinds of header line in the carrier file:
 
 ```ini
-# device-network: 10.9.8.0/24     # written by the wireguard-tools server repo
+# device-network: 10.9.8.0/24     # written by wireguard-tools
 # tunnel-routes: 10.0.0.5/32      # your own: anything else to send through the carrier
 ```
 
-`device-network` is the server's static device addresses (from the
-wireguard-tools server repo, not the Homebrew package of the same name):
-`10.9.8.1` is the server, `10.9.8.<number>` a device.
+`device-network` is the server's static device addresses, written by
+wireguard-tools: `10.9.8.1` is the server, `10.9.8.<number>` a device.
 
 Extras are rebuilt on every sweep: delete a line and they're gone the next
 time. A `#` after the addresses starts a
@@ -762,10 +784,11 @@ after (Cmd-K).
 `nord.sh` makes NordLynx (WireGuard) configs from your Nord account.
 Put the access token (Nord account > NordVPN > Manual setup) in
 `~/wg-tunnels/.nord-token`, one line; it's never an argument. Run it with no
-arguments and it asks: a device or a server, which one, carrier or config (a
-device only: a carrier [carries WARP](#warped-tunnels), a config is a plain
-tunnel), the country, then a numbered list of that country's cities
-(Enter = any: Nord's pick in the whole country). Nord has cities, not states
+arguments and it asks: a device or a [server](#servers), which
+one, carrier or config (a device only: a carrier
+[carries WARP](#warped-tunnels), a config is a plain tunnel), the country,
+then a numbered list of that country's cities (Enter = any: Nord's pick in
+the whole country). Nord has cities, not states
 or regions; in the US that's about one per state (Hawaii is Honolulu).
 
 ```
@@ -777,7 +800,7 @@ nord.sh device mbp-1 config us honolulu   # devices/mbp-1/config/nord.us.honolul
 nord.sh server dengar us "new york"       # servers/dengar/carriers/nord.us.new-york.conf: jump new-us
 ```
 
-- **One file per holder and place** (a country, or a city in it). Running it
+- **One file per device or server and place** (a country, or a city in it). Running it
   again regenerates that file, keeping its Nord server while Nord still
   recommends it. A device can have both a carrier and a config for one place.
   Only files with a `# source: nord` line are regenerated; another file of the
@@ -794,21 +817,17 @@ nord.sh server dengar us "new york"       # servers/dengar/carriers/nord.us.new-
   names jumps, with a digit if that code is taken (`new-us`, `ne2-us`). Nord's
   own server names, like `us11553`, are too long for a jump code.
 - Nord recommends servers near the Mac that runs `nord.sh`, not near the
-  holder: for a server elsewhere, the country is what you choose.
+  device or server the config is for: for a server elsewhere, the country is
+  what you choose.
 
 ## Shared folder
 
-Optional. If you run your own servers with
-[wireguard-tools](https://github.com/cgmckeever/wireguard-tools), it shares
-`~/wg-tunnels` with this repo: it reads each server's exits from
-`servers/<server>/carriers/` and puts the client configs it issues in
-`devices/<device>/config/` ([Your folders](#your-folders)). Whichever runs
-first creates `~/wg-tunnels`. Everything here works without it.
-
-Both read its location from `$WG_TUNNELS` (default `~/wg-tunnels`; this
-README writes `~/wg-tunnels` for either). Set it in your shell profile before
-the first `install.sh`. The menu bar doesn't read it, so its Rotate WARP Keys
-and Export Diagnostics only work with the default location.
+Only with [wireguard-tools](https://github.com/cgmckeever/wireguard-tools).
+It shares `~/wg-tunnels` with this repo: it reads each server's exits from
+`servers/<server>/carriers/` ([Servers](#servers)) and puts the client configs
+it issues in `devices/<device>/config/` ([Devices](#devices)). Whichever runs
+first creates `~/wg-tunnels`, and both read its location from `$WG_TUNNELS`
+([Your folders](#your-folders)).
 
 **Configs wireguard-tools issued** start with
 `# wireguard-tools client: <config> on <server>`. They're wgt-ctl's to
@@ -820,6 +839,3 @@ rather than write a warped tunnel over one.
 **Backups.** When wgt-ctl replaces or removes a config, the old one becomes
 `<name>.conf.<time>.bak`. Everything here reads only `*.conf`, so backups are
 never listed, imported or built. Delete them when you no longer need them.
-
-**Jumps.** A file in `servers/<server>/carriers/` names its jump in a
-`# jump: <code> <label>` line.

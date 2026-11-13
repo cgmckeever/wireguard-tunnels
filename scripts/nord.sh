@@ -103,7 +103,7 @@ is_nord() { grep -q '^# source: nord' "$1"; }
 shopt -s nullglob
 
 # 1. The holder: a device or a server
-kind=$(pick "holder type" "$1" device server) || exit 1
+kind=$(pick "device or server" "$1" device server) || exit 1
 if [ "$kind" = server ]; then base="$WG_TUNNELS/servers"; else base="$WG_TUNNELS/devices"; fi
 names=()
 while read -r n; do names+=("$n"); done < <(folders "$base")
