@@ -743,6 +743,7 @@ runs one tunnel at a time.
   `DNS` line says.
 - `strict_route` keeps traffic in the VPN. sing-box has no kill switch; this
   is the closest it gets.
+- The tun uses the `system` stack (the OS's own network stack, not gVisor).
 - A server given by hostname is looked up on the device's own network, since
   through the tunnel it would need that tunnel up first.
 - A carrier's [extras](#extras) get a rule sending them to the carrier, since

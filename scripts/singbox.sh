@@ -328,9 +328,10 @@ trap 'rm -f "${STAGED_TMP[@]}"' EXIT
 #
 # Everything goes through the picked tunnel, DNS included (1.1.1.1, hijacked
 # from the tun). strict_route keeps traffic in the VPN: the nearest sing-box
-# gets to a kill switch. A server given by hostname is looked up on the
-# device's own network (default_domain_resolver): through the tunnel, it would
-# need itself up first.
+# gets to a kill switch. The tun uses the system stack (the OS's own, not
+# gVisor), as the iPhone's hand-edited profile did. A server given by
+# hostname is looked up on the device's own network (default_domain_resolver):
+# through the tunnel, it would need itself up first.
 stage_profile() {
     local out="$1" tmp
     tmp=$(mktemp "$(dirname "$out")/.profile.XXXXXX") || die "mktemp failed"
@@ -341,7 +342,7 @@ stage_profile() {
                             { type: "local", tag: "local" } ],
                  final: "cloudflare" },
           inbounds: [ { type: "tun", tag: "tun-in", address: ["172.19.0.1/30", "fdfe:dcba:9876::1/126"],
-                        mtu: $mtu, auto_route: true, strict_route: true } ],
+                        mtu: $mtu, stack: "system", auto_route: true, strict_route: true } ],
           endpoints: $endpoints,
           outbounds: [ { type: "selector", tag: "tunnel", outbounds: $tags, default: $tags[0] } ],
           route: { auto_detect_interface: true, final: "tunnel", default_domain_resolver: "local",
