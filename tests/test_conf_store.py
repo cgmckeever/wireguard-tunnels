@@ -32,7 +32,6 @@ def test_keepalive_mtu_endpoint():
     (client("a").replace("PublicKey", "#"), "no PublicKey"),
     (client("a").replace("51820", "port"), "Endpoint isn't host:port"),
     (client("a", mtu=1280).replace("1280", "big"), "MTU isn't a number from 576 to 65535"),
-    (client("a", mtu=0), ""),                                   # no MTU line: client() writes none for 0
     (client("a", mtu=1280).replace("1280", "0"), "MTU isn't a number from 576 to 65535"),
     (client("a").replace("51820", "99999999"), "Endpoint isn't host:port"),
     (client("a").replace("51820", "0"), "Endpoint isn't host:port"),

@@ -15,7 +15,7 @@ import sys
 import tempfile
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
-from .conf import Conf, Error, read_text, stem
+from .conf import Conf, Error, is_number, read_text, stem
 
 KEEPALIVE = 25                       # seconds: every one-tunnel config has one
 WARP_ENDPOINT = "162.159.192.1:2408"  # Cloudflare's, unless .warp-endpoint says otherwise
@@ -190,7 +190,7 @@ def valid_endpoint(ep: str) -> bool:
         ipaddress.IPv4Address(host)
     except ValueError:
         return False
-    return port.isascii() and port.isdigit() and 1 <= int(port) <= 65535
+    return is_number(port) and 1 <= int(port) <= 65535
 
 
 def warp_net(endpoint: str) -> str:
@@ -207,9 +207,13 @@ def inner_mtu(carrier_mtu: int, warp_mtu: int = WARP_MTU) -> int:
 # --- writing ---
 
 def state_of(path: str, text: str) -> str:
-    """What writing text to path would be: new, updated or unchanged."""
+    """What writing text to path would be: new, updated or unchanged. A file
+    there under another case (the Mac's file system finds it) is updated: its
+    name changes, and the name is what tunnel.sh and the WireGuard app go by."""
     if not os.path.isfile(path):
         return "new"
+    if os.path.basename(path) not in os.listdir(os.path.dirname(path) or "."):
+        return "updated"
     with open(path, "rb") as f:
         return "unchanged" if f.read() == text.encode() else "updated"
 

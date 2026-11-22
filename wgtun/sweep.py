@@ -296,7 +296,7 @@ class Sweep:
         remote = next((ln.split(" : ", 1)[1] for ln in command(["scutil", "--nc", "show", r.name]).split("\n")
                        if "RemoteAddress" in ln and " : " in ln), "")
         endpoint = (Conf(r.text) if r.text else Conf.read(r.path)).value("Endpoint")
-        host, _, port = endpoint.rpartition(":")
+        host, _, port = endpoint.rpartition(":")     # as written (Conf.endpoint unbrackets): as the app shows it
         # The app keeps the address a hostname resolved to: compare that too
         ip = next((ln.split()[1] for ln in command(["dscacheutil", "-q", "host", "-a", "name", host]).split("\n")
                    if ln.startswith("ip_address:")), "")

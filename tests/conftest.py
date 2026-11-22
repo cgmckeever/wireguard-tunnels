@@ -75,9 +75,8 @@ def tmp_store(tmp_path, monkeypatch) -> Iterator[Store]:
     root = str(tmp_path / "wg-tunnels")
     os.makedirs(os.path.join(root, "devices"), mode=0o700)
     monkeypatch.setenv("WG_TUNNELS", root)
-    old = os.umask(0o077)       # as the scripts' main()s set it
+    os.umask(0o077)             # as the scripts' main()s set it (_umask puts it back)
     yield Store(root)
-    os.umask(old)
 
 
 def fake_command(tmp_path, monkeypatch, name: str, script: str) -> None:

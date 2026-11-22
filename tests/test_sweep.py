@@ -219,3 +219,13 @@ def test_a_carrier_renamed_by_case(tmp_store):
     assert not [r for r in s.rows if r.state == "orphan"]
     assert [c.name for c in s.configs() if c.name.lower() == "warped.srv.ph"] == ["warped.srv.ph"]
     assert "warped.srv.ph.conf" in os.listdir(tmp_store.path("devices/ph/config"))
+
+
+def test_a_case_only_rename_is_updated(tmp_store):
+    """The sweep, build and check see it: the name changes, and names are what count."""
+    tmp_store.device("ph")
+    tmp_store.put("devices/ph/carriers/Srv.conf", client("srv"))
+    run(tmp_store, "ph")
+    os.rename(tmp_store.path("devices/ph/carriers/Srv.conf"), tmp_store.path("devices/ph/carriers/srv.conf"))
+    planned = sweep.Sweep(tmp_store.path("devices/ph"), app_column=False)
+    assert next(r.state for r in planned.rows if r.name == "warped.srv.ph") == "updated"

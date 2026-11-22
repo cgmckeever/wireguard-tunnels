@@ -53,8 +53,8 @@ def modes(f: store.Folder) -> Found:
 def check_device(name: str) -> Found:
     f = store.Folder.of(name)
     found = modes(f)
-    broken: Set[str] = set()                     # configs already reported: the sweep or build skips them
-    unreadable = False                 # one the sweep or build would stop at
+    broken: Set[str] = set()           # configs already reported: the sweep or build skips them
+    unreadable = False
     for path in f.confs():
         try:
             c = Conf.read(path)
@@ -73,7 +73,7 @@ def check_device(name: str) -> Found:
         return found
     try:
         found += up_to_date(f, broken)
-    except store.FAILURES as e:        # one the sweep or build would stop at, not already said
+    except store.FAILURES as e:        # a shared key, say
         found.append(("error", str(e)))
     return found
 

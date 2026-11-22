@@ -17,7 +17,7 @@ GOLDEN = os.path.join(os.path.dirname(__file__), "golden", "edge", "devices")
 
 
 def source() -> str:
-    with open(TUNNEL_SH) as f:
+    with open(TUNNEL_SH, encoding="utf-8") as f:
         return f.read()
 
 
@@ -146,4 +146,4 @@ def test_ipv6_found_on_any_address_line():
     conf = os.path.join(GOLDEN, "edge1", "config", "warp.edge1.conf")
     check = "list_of \"$1\" Address | grep -q ':'"
     assert bash(functions("conf_vals", "list_of"), check, conf).returncode == 0
-    assert check.replace("list_of", "conf_val") not in source()      # not the first line only
+    assert check.replace('"$1"', '"$CONF/$1.conf"') in source()      # what take_traffic runs
