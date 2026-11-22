@@ -161,8 +161,10 @@ DEV_DIR="$DEVICES/$device"
 WARP_DIR="$DEV_DIR/warp"
 # The WARP endpoint: <device>/.warp-endpoint, else ~/wg-tunnels/.warp-endpoint
 # (one line, IPv4:port), else Cloudflare's default. Read by the same code as
-# the sweep's (wgtun/store.py), so this Mac's WARP and its config/ agree.
-WARP_ENDPOINT=$(PYTHONPATH="$REPO" python3 -m wgtun.store warp-endpoint "$DEV_DIR") || exit 1
+# the sweep's (wgtun/), so this Mac's WARP and its config/ agree. Checked now,
+# before anything changes; used for warp.conf below.
+forinstall() { PYTHONPATH="$REPO" python3 -m wgtun.forinstall "$@"; }
+forinstall warp-endpoint "$DEV_DIR" > /dev/null || exit 1
 
 umask 077    # until warp.conf is written: everything here holds private keys
 # 0700: everything under ~/wg-tunnels holds private keys
@@ -213,45 +215,12 @@ for f in "$WARP_DIR/wgcf-account.toml" "$WARP_DIR/wgcf-profile.conf"; do
     fi
 done
 
-# warp.conf for wg-quick, from the wgcf profile
-profile="$WARP_DIR/wgcf-profile.conf"
-# conf_val <Key>: the value after the first "=", up to whitespace (an awk split
-# on "=" would drop the keys' base64 "=" padding)
-conf_val() { sed -nE "s/^[[:space:]]*$1[[:space:]]*=[[:space:]]*([^[:space:]]+).*/\1/p" "$profile" | head -1; }
-private_key=$(conf_val PrivateKey)
-public_key=$(conf_val PublicKey)
-# wgcf writes one Address line per family
-addresses=$(awk -F'[[:space:]]*=[[:space:]]*' '$1 == "Address" {print $2}' "$profile" \
-    | tr ',' '\n' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | grep . | paste -sd, - | sed 's/,/, /g')
-[ -n "$private_key" ] && [ -n "$public_key" ] && [ -n "$addresses" ] \
-    || die "Can't read PrivateKey/PublicKey/Address from $profile"
-
+# warp.conf for wg-quick, from the wgcf profile (wgtun/forinstall.py writes it)
 warp_conf="$BREW_PREFIX/etc/wireguard/warp.conf"
 mkdir -p "$BREW_PREFIX/etc/wireguard" && chmod 700 "$BREW_PREFIX/etc/wireguard"
 umask 077
 tmp=$(mktemp "$BREW_PREFIX/etc/wireguard/.warp.XXXXXX") || die "mktemp failed"
-cat > "$tmp" <<EOF
-# Written by wireguard-tunnels install.sh from ~/wg-tunnels/devices/${device}/warp/wgcf-profile.conf.
-#
-# Cloudflare WARP exit, carried inside another WireGuard tunnel (warped.*). \`tunnel.sh import\`
-# copies it for the wg-tunnels daemon, which does the
-# routing; don't bring it up on its own. Table = off skips wg-quick's routing,
-# which would send the endpoint straight out the NIC, around the carrier.
-[Interface]
-PrivateKey = ${private_key}
-Address = ${addresses}
-DNS = 1.1.1.1
-# IPv6's minimum: fits in a carrier of 1360 or more (tunnel.sh lowers it in a smaller one)
-MTU = 1280
-Table = off
-
-[Peer]
-PublicKey = ${public_key}
-AllowedIPs = 0.0.0.0/0, ::/0
-Endpoint = ${WARP_ENDPOINT}
-# A stale handshake then means trouble, not idleness (the daemon's watchdog)
-PersistentKeepalive = 25
-EOF
+forinstall daemon-warp "$DEV_DIR" > "$tmp" || { rm -f "$tmp"; exit 1; }
 chmod 600 "$tmp"
 if [ -f "$warp_conf" ] && cmp -s "$tmp" "$warp_conf"; then
     rm -f "$tmp"

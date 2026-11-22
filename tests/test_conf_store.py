@@ -83,6 +83,11 @@ def test_sweep_owned_by_name():
     assert not store.sweep_owned("dengar.warp.iphone", "iphone")
 
 
-def test_by_name_is_the_shells_folder_order():
-    names = ["srv", "Upper", "home", "warped.q", "warped-y"]
-    assert store.by_name(names) == ["home", "srv", "Upper", "warped-y", "warped.q"]
+def test_collated_is_the_shells_order(monkeypatch):
+    """bash's *.conf and sort, in an en_US.UTF-8 terminal: case folded, and
+    punctuation before digits before letters (not bytewise)."""
+    monkeypatch.setenv("LC_ALL", "en_US.UTF-8")
+    names = ["srv", "Upper", "home", "warped.q", "warped-y", "warped_z"]
+    assert store.collated(names) == ["home", "srv", "Upper", "warped_z", "warped-y", "warped.q"]
+    assert store.collated(["fd00:1::/48", "FE80::/10", "fd00::/8", "10.9.8.0/24", "100.64.0.0/10"]) == \
+        ["10.9.8.0/24", "100.64.0.0/10", "fd00::/8", "fd00:1::/48", "FE80::/10"]

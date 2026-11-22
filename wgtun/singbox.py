@@ -168,6 +168,9 @@ def units(dev: Device, swept: sweep.Sweep, say: Say) -> List[Unit]:
     the plain ones, then WARP alone."""
     configs = swept.configs()
     warp = next((c for c in configs if c.name == store.warp_alone(dev.name)), None)
+    if warp is not None and warp.problem():        # a stale copy of a profile the sweep skipped
+        say(f"skipped {warp.name}: {warp.problem()}", False)
+        warp = None
     usable = {r.name for r in swept.written()}       # warped tunnels with a carrier the sweep could use
     out: List[Unit] = []
     seen_cidrs: set = set()
@@ -210,9 +213,9 @@ def warped(c: Conf, mtu: int, warp: Conf, seen_cidrs: set, say: Say) -> Unit:
     without one they'd go into WARP. WARP runs at its own MTU (1280 from
     wgcf), lowered when the carrier can't fit that plus its 80 bytes."""
     carrier = "carrier." + c.name[len("warped."):]
-    wmtu = min(warp.mtu(store.WARP_MTU), mtu - store.WARP_OVERHEAD)
+    wmtu = store.inner_mtu(mtu, warp.mtu(store.WARP_MTU))
     warp_net = f"{warp.endpoint()[0]}/32"
-    own = sorted({cidr for cidr in c.items("AllowedIPs") if cidr != warp_net})
+    own = store.collated({cidr for cidr in c.items("AllowedIPs") if cidr != warp_net})
     for cidr in own:
         if cidr in seen_cidrs:
             say(f"warning: {cidr} is in two carriers: profiles with both send it to the first, not {carrier}", True)
@@ -245,7 +248,7 @@ def check_keys(dev: Device, used: List[Conf], say: Say) -> None:
         if name == dev.name:
             continue
         d = os.path.join(store.devices_dir(), name)
-        paths = store.confs_in(os.path.join(d, "carriers")) + store.confs_in(os.path.join(d, "config"))
+        paths = store.files_in(os.path.join(d, "carriers")) + store.files_in(os.path.join(d, "config"))
         paths += [p for p in [os.path.join(d, "warp", "wgcf-profile.conf")] if os.path.isfile(p)]
         others += [f"  {mine[k]} and {label}" for k, label in keyed([Conf.read(p) for p in paths]) if k in mine]
     if others:
@@ -259,7 +262,7 @@ def check_tags(dev: Device, made: List[Unit]) -> None:
     """Endpoint names are unique ("tunnel" is the picker's), and no tunnel is
     named like the composite or a group profile."""
     tags = [ep["tag"] for u in made for ep in u.endpoints] + ["tunnel"]
-    dup = sorted({t for t in tags if tags.count(t) > 1})
+    dup = store.collated({t for t in tags if tags.count(t) > 1})
     if dup:
         raise Error(f"more than one tunnel would be named: {' '.join(dup)} (rename the config; \"tunnel\", "
                     f"\"warp.{dev.name}\" and \"carrier.<name>\" are taken)")
@@ -294,7 +297,7 @@ def plan(dev: Device, swept: sweep.Sweep, say: Say) -> Dict[str, str]:
 
 def sweep_for(dev: Device) -> sweep.Sweep:
     try:
-        return sweep.Sweep(dev.dir, for_singbox=True)
+        return sweep.Sweep(dev.dir, app_column=False)
     except Error as e:
         print(f"{sweep.PROG}: {e}", file=sys.stderr)
         raise Error("sweep failed") from None
@@ -327,9 +330,10 @@ def cmd_build(name: str) -> None:
         if state != "unchanged":
             store.write_private(path, text)
         print(f"{f:<48} {state}")
-    for f in store.by_name([f for f in os.listdir(out) if f.endswith(".json") and not f.startswith(".")]):
+    for path in store.files_in(out, ".json"):
+        f = os.path.basename(path)
         if f not in files:
-            os.remove(os.path.join(out, f))
+            os.remove(path)
             print(f"{f:<48} removed (no longer built)")
     if not checked:
         print("(not checked: sing-box isn't installed on this Mac)")
@@ -410,12 +414,11 @@ def cmd_list() -> None:
     for name in names:
         d = os.path.join(store.devices_dir(), name)
         profiles = os.path.join(d, "sing-box")
-        n_profiles = len([f for f in os.listdir(profiles) if f.endswith(".json") and not f.startswith(".")]) \
-            if os.path.isdir(profiles) else 0
+        n_profiles = len(store.files_in(profiles, ".json"))
         shown = name + (" (this Mac)" if name == mac else "")
         warp = "yes" if os.path.isfile(os.path.join(d, "warp", "wgcf-profile.conf")) else "no"
-        print(f"{shown:<20} {len(store.confs_in(os.path.join(d, 'carriers'))):<9} "
-              f"{len(store.confs_in(os.path.join(d, 'config'))):<8} {warp:<5} {n_profiles}")
+        print(f"{shown:<20} {len(store.files_in(os.path.join(d, 'carriers'))):<9} "
+              f"{len(store.files_in(os.path.join(d, 'config'))):<8} {warp:<5} {n_profiles}")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -432,7 +435,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         else:
             print(__doc__, end="")
             return 0 if verb in ("-h", "--help") else 1
-    except Error as e:
+    except store.FAILURES as e:
         store.die(PROG, str(e))
     return 0
 

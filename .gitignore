@@ -10,3 +10,6 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Test fixtures: fake keys only
+!tests/golden/**/*.conf

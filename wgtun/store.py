@@ -3,10 +3,12 @@ rules every tunnel follows."""
 
 from __future__ import annotations
 
+import locale
 import os
 import re
 import sys
-from typing import List, NoReturn
+import tempfile
+from typing import Iterable, List, NoReturn
 
 KEEPALIVE = 25                       # seconds: every one-tunnel config has one
 WARP_ENDPOINT = "162.159.192.1:2408"  # Cloudflare's, unless .warp-endpoint says otherwise
@@ -18,6 +20,11 @@ SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 class Error(Exception):
     """A reason to stop, said once by the script's main()."""
+
+
+# What a main() reports as one line instead of a traceback: its own reasons,
+# and a file it can't read or write (permissions, a race, not UTF-8)
+FAILURES = (Error, OSError, UnicodeDecodeError)
 
 
 def die(prog: str, msg: str) -> NoReturn:
@@ -42,24 +49,34 @@ def this_mac() -> str:
         return ""
 
 
-def by_name(names: List[str]) -> List[str]:
-    """In the shell's order for a folder: by name, case aside."""
-    return sorted(names, key=lambda n: (os.path.basename(n).lower(), n))
+def collated(items: Iterable[str]) -> List[str]:
+    """In the shell's order: the locale's collation (LC_COLLATE), as bash
+    lists <folder>/*.conf and sort sorts. Which tunnel a composite profile
+    picks first, and the order of a carrier's routes, follow it."""
+    locale.setlocale(locale.LC_COLLATE, "")
+    return sorted(items, key=locale.strxfrm)
 
 
-def confs_in(folder: str) -> List[str]:
-    """The .conf files in a folder (none if it isn't one), by name."""
+def files_in(folder: str, ext: str = ".conf") -> List[str]:
+    """The <ext> files in a folder (none if it isn't one), by name, as the
+    shell's <folder>/*<ext> lists them: dotfiles (temp files) aren't."""
     if not os.path.isdir(folder):
         return []
-    return by_name([os.path.join(folder, f) for f in os.listdir(folder)
-                    if f.endswith(".conf") and not f.startswith(".")])
+    return collated([os.path.join(folder, f) for f in os.listdir(folder)
+                    if f.endswith(ext) and not f.startswith(".")])
+
+
+def inner_mtu(carrier_mtu: int, warp_mtu: int = WARP_MTU) -> int:
+    """WARP's MTU inside a carrier: its own, lowered when the carrier can't
+    fit that plus what it adds to each packet. (tunnel.sh has its own copy.)"""
+    return min(warp_mtu, carrier_mtu - WARP_OVERHEAD)
 
 
 def all_devices() -> List[str]:
     d = devices_dir()
     if not os.path.isdir(d):
         return []
-    return by_name([n for n in os.listdir(d) if not n.startswith(".") and os.path.isdir(os.path.join(d, n))])
+    return collated([n for n in os.listdir(d) if not n.startswith(".") and os.path.isdir(os.path.join(d, n))])
 
 
 def warp_endpoint(device_dir: str) -> str:
@@ -116,30 +133,19 @@ def state_of(path: str, text: str) -> str:
 
 
 def write_private(path: str, text: str) -> None:
-    """Put text at path, 0600, all at once (a temp file beside it, then a rename)."""
-    tmp = os.path.join(os.path.dirname(path), f".{os.path.basename(path)}.tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w", newline="") as f:
-        f.write(text)
-    os.replace(tmp, path)
+    """Put text at path, 0600, all at once: a temp file of its own beside it
+    (mkstemp makes it 0600), then a rename; never a half-written file."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".")
+    try:
+        with os.fdopen(fd, "w", newline="") as f:
+            f.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
 
 
 def private_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
     os.chmod(path, 0o700)
 
-
-def main(argv: List[str]) -> int:
-    """python3 -m wgtun.store warp-endpoint <device dir>: for install.sh, so it
-    reads .warp-endpoint as the sweep does."""
-    if len(argv) != 2 or argv[0] != "warp-endpoint":
-        die("wgtun.store", "usage: python3 -m wgtun.store warp-endpoint <device dir>")
-    try:
-        print(warp_endpoint(argv[1]))
-    except Error as e:
-        die("install.sh", str(e))
-    return 0
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))

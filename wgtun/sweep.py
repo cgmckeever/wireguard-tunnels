@@ -50,7 +50,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, TextIO
 
 from . import store
 from .conf import Conf
@@ -77,22 +77,21 @@ V4 = re.compile(r"[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?")
 V6 = re.compile(r"[0-9A-Fa-f]*:[0-9A-Fa-f:.]*(/[0-9]{1,3})?")
 
 
-def extras(carrier: Conf) -> List[Tuple[str, str]]:
-    """Each entry on its device-network and tunnel-routes lines as (verdict, entry):
-    kept (the carrier takes it), wide (wider than /8, /16 for IPv6: it would
-    take traffic away from WARP) or bad (not an address)."""
-    out = []
+def extras(carrier: Conf) -> Dict[str, List[str]]:
+    """The entries on its device-network and tunnel-routes lines, by verdict:
+    kept (the carrier takes it), wide or bad (see verdict)."""
+    found: Dict[str, List[str]] = {"kept": [], "wide": [], "bad": []}
     for line in carrier.lines:
         m = re.match(r"#\s*(?:device-network|tunnel-routes):\s*(.*)", line)
-        if not m:
-            continue
-        for e in re.split(r"[, \t]+", m.group(1).split("#", 1)[0]):
+        for e in re.split(r"[, \t]+", m.group(1).split("#", 1)[0]) if m else []:
             if e:
-                out.append((verdict(e), e))
-    return out
+                found[verdict(e)].append(e)
+    return found
 
 
 def verdict(e: str) -> str:
+    """kept, wide (wider than /8, /16 for IPv6: it would take traffic away
+    from WARP) or bad (not an address). tunnel.sh swept_ok has the same limits."""
     if V4.fullmatch(e):
         if any(int(o) > 255 for o in e.split("/")[0].split(".")):
             return "bad"
@@ -105,8 +104,18 @@ def verdict(e: str) -> str:
     return "bad" if bits > most else "wide" if bits < least else "kept"
 
 
-def kept(carrier: Conf, which: str = "kept") -> List[str]:
-    return [e for v, e in extras(carrier) if v == which]
+def carrier_notes(carrier: Conf, found: Dict[str, List[str]]) -> List[str]:
+    """What the table says under a carrier: its extras, and a small MTU."""
+    notes = [say.format(", ".join(found[v])) for v, say in (
+        ("kept", "also carries {}"),
+        ("wide", "ignored, too wide (would bypass WARP): {}"),
+        ("bad", "ignored, not an address: {}")) if found[v]]
+    # WARP needs 1280 inside (IPv6's minimum): a carrier too small for that
+    # plus its overhead makes tunnel.sh and singbox.sh run WARP smaller
+    mtu = carrier.value("MTU")
+    if mtu.isdigit() and store.inner_mtu(int(mtu)) < store.WARP_MTU:
+        notes.append(f"carrier MTU {mtu}: WARP runs at {store.inner_mtu(int(mtu))} inside (IPv6 and QUIC fall back)")
+    return notes
 
 
 # --- what the sweep writes ---
@@ -115,19 +124,18 @@ def drop(_line: str) -> List[str]:
     return []
 
 
-def render_warped(carrier: Conf, warp_net: str) -> str:
+def render_warped(carrier: Conf, warp_net: str, kept: List[str]) -> str:
     """The warped config: it carries WARP and its extras only (one AllowedIPs
     line), DNS gone (it comes from WARP), a keepalive so a stale handshake
     means trouble."""
-    allowed = f"AllowedIPs = {', '.join([warp_net] + kept(carrier))}"
+    allowed = f"AllowedIPs = {', '.join([warp_net] + kept)}"
     has_allowed = bool(carrier.values("AllowedIPs"))
-    first = [True]
+    first = True
 
     def allowed_once(_line: str) -> List[str]:
-        if not first[0]:
-            return []
-        first[0] = False
-        return [allowed]
+        nonlocal first
+        line, first = ([allowed] if first else []), False
+        return line
 
     return carrier.rewrite({
         "DNS": drop,
@@ -166,7 +174,7 @@ def resolve(arg: str) -> str:
 
 
 class Sweep:
-    def __init__(self, folder: str, for_singbox: bool = False) -> None:
+    def __init__(self, folder: str, app_column: bool = True) -> None:
         self.dir = folder
         self.device = os.path.basename(os.path.abspath(folder))
         self.carriers_dir = os.path.join(folder, "carriers")
@@ -179,7 +187,7 @@ class Sweep:
         if self.no_carriers and not same_dir(os.path.dirname(os.path.abspath(folder)), store.devices_dir()):
             raise Error(f"no carriers/ in {folder} (singbox.sh new <device> makes a device)")
         mac = store.this_mac()
-        self.app = (not for_singbox and bool(mac) and os.path.isdir(os.path.join(store.devices_dir(), mac))
+        self.app = (app_column and bool(mac) and os.path.isdir(os.path.join(store.devices_dir(), mac))
                     and same_dir(folder, os.path.join(store.devices_dir(), mac)))
         self.endpoint = store.warp_endpoint(folder)
         self.rows = self.plan()
@@ -189,7 +197,7 @@ class Sweep:
         rows: List[Row] = []
         claimed = set()
         warp_net = self.endpoint.rsplit(":", 1)[0] + "/32"
-        for path in store.confs_in(self.carriers_dir):
+        for path in store.files_in(self.carriers_dir):
             name = store.warped_name(path, self.device)
             carrier = Conf.read(path)
             why = carrier.problem()       # first: a broken carrier doesn't take the name from a good one
@@ -201,17 +209,23 @@ class Sweep:
                 rows.append(Row(name, "skipped", detail=f"{os.path.basename(path)}: {why}"))
                 continue
             claimed.add(name)
-            text = render_warped(carrier, warp_net)
-            rows.append(self.output(name, text, carrier_notes(carrier) + mtu_note(text)))
+            found = extras(carrier)
+            text = render_warped(carrier, warp_net, found["kept"])
+            rows.append(self.output(name, text, carrier_notes(carrier, found)))
         if os.path.isfile(self.profile):
             name = store.warp_alone(self.device)
             claimed.add(name)
-            row = self.output(name, render_warp_alone(Conf.read(self.profile), self.endpoint), [])
-            row.detail = "(WARP alone, a plain tunnel)"
-            rows.append(row)
+            profile = Conf.read(self.profile)
+            why = profile.problem()
+            if why:
+                rows.append(Row(name, "skipped", detail=f"warp/wgcf-profile.conf: {why}"))
+            else:
+                row = self.output(name, render_warp_alone(profile, self.endpoint), [])
+                row.detail = "(WARP alone, a plain tunnel)"
+                rows.append(row)
         # config/ files no carrier claims: a warped one lost its carrier (an
         # orphan: reported, never deleted); anything else is someone else's
-        for path in store.confs_in(self.config_dir):
+        for path in store.files_in(self.config_dir):
             name = os.path.basename(path)[: -len(".conf")]
             if name not in claimed:
                 rows.append(Row(name, "orphan" if store.sweep_owned(name, self.device) else "manual", path=path))
@@ -227,10 +241,11 @@ class Sweep:
     def configs(self) -> List[Conf]:
         """config/ as it is once the sweep has run (read now, or as it will be)."""
         planned = {r.path: r.text for r in self.written()}
-        paths = store.by_name(list(set(store.confs_in(self.config_dir)) | set(planned)))
+        paths = store.collated(set(store.files_in(self.config_dir)) | set(planned))
         return [Conf(planned[p], p) if p in planned else Conf.read(p) for p in paths]
 
-    def run(self, no_next: bool = False, out=sys.stdout) -> None:
+    def run(self, no_next: bool = False, out: Optional[TextIO] = None) -> None:
+        out = out or sys.stdout
         store.private_dir(self.dir)
         store.private_dir(self.config_dir)
         if not self.no_carriers:
@@ -245,12 +260,12 @@ class Sweep:
         if self.no_carriers:
             print(f"No carriers/ in {self.dir}: plain configs only "
                   f"(singbox.sh new {self.device} adds carriers/)\n", file=out)
-        elif not store.confs_in(self.carriers_dir):
+        elif not store.files_in(self.carriers_dir):
             print(f"No configs in {self.carriers_dir}: put WireGuard configs there "
                   f"(x.conf becomes warped.x.{self.device})\n", file=out)
         say("TUNNEL", "FILE", "WIREGUARD APP (only if you use it)" if self.app else "")
         for r in self.rows:
-            if r.state == "skipped" or r.detail:
+            if r.detail:
                 say(r.name, r.state, r.detail)
             elif r.state == "orphan":
                 say(r.name, r.state, "(no usable carrier in carriers/: left in place)")
@@ -275,7 +290,7 @@ class Sweep:
             return "not there: add it in the app"
         remote = next((ln.split(" : ", 1)[1] for ln in command(["scutil", "--nc", "show", r.name]).split("\n")
                        if "RemoteAddress" in ln and " : " in ln), "")
-        endpoint = Conf.read(r.path).value("Endpoint") if not r.text else Conf(r.text).value("Endpoint")
+        endpoint = (Conf(r.text) if r.text else Conf.read(r.path)).value("Endpoint")
         host, _, port = endpoint.rpartition(":")
         # The app keeps the address a hostname resolved to: compare that too
         ip = next((ln.split()[1] for ln in command(["dscacheutil", "-q", "host", "-a", "name", host]).split("\n")
@@ -285,26 +300,6 @@ class Sweep:
         return {"updated": "there, but changed: remove it and add again in the app",
                 "new": "there, same server: if the app's copy isn't this config, remove it and add again"}.get(
                     state, "there, same server")
-
-
-def carrier_notes(carrier: Conf) -> List[str]:
-    notes = []
-    for which, say in (("kept", "also carries {}"), ("wide", "ignored, too wide (would bypass WARP): {}"),
-                       ("bad", "ignored, not an address: {}")):
-        found = kept(carrier, which)
-        if found:
-            notes.append(say.format(", ".join(found)))
-    return notes
-
-
-def mtu_note(text: str) -> List[str]:
-    """WARP needs 1280 inside (IPv6's minimum), so a carrier under 1360 makes
-    tunnel.sh and singbox.sh run it at the carrier's MTU - 80."""
-    m = re.match(r"[0-9]+", Conf(text).value("MTU"))
-    mtu = int(m.group()) if m else None
-    if mtu is None or mtu >= store.WARP_MTU + store.WARP_OVERHEAD:
-        return []
-    return [f"carrier MTU {mtu}: WARP runs at {mtu - store.WARP_OVERHEAD} inside (IPv6 and QUIC fall back)"]
 
 
 def same_dir(a: str, b: str) -> bool:
@@ -330,7 +325,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         store.die(PROG, USAGE)
     try:
         Sweep(resolve(args[0] if args else "")).run(no_next=bool(os.environ.get("SWEEP_NO_NEXT")))
-    except Error as e:
+    except store.FAILURES as e:
         store.die(PROG, str(e))
     return 0
 

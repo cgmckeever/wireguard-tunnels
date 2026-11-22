@@ -1,0 +1,81 @@
+{
+  "log": {
+    "level": "warn"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "cloudflare",
+        "server": "1.1.1.1",
+        "detour": "tunnel"
+      },
+      {
+        "type": "local",
+        "tag": "local"
+      }
+    ],
+    "final": "cloudflare"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 1420,
+      "stack": "system",
+      "auto_route": true,
+      "strict_route": true
+    }
+  ],
+  "endpoints": [
+    {
+      "type": "wireguard",
+      "tag": "home.lan.edge1",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "TqFAWIFQdzzjqs54au739ASc4QD6ZJyU+73blg8dqUI=",
+      "peers": [
+        {
+          "address": "vpn.example.net",
+          "port": 51820,
+          "public_key": "cqO6603mpOwlBlF+OrDlzWGfbqITAw6ckZ3pi/jyhYQ=",
+          "allowed_ips": [
+            "192.168.1.0/24"
+          ]
+        }
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "tunnel",
+      "outbounds": [
+        "home.lan.edge1"
+      ],
+      "default": "home.lan.edge1"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "final": "tunnel",
+    "default_domain_resolver": "local",
+    "rules": [
+      {
+        "inbound": "tun-in",
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      }
+    ]
+  }
+}

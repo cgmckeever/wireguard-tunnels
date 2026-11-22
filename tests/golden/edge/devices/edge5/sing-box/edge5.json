@@ -1,0 +1,126 @@
+{
+  "log": {
+    "level": "warn"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "cloudflare",
+        "server": "1.1.1.1",
+        "detour": "tunnel"
+      },
+      {
+        "type": "local",
+        "tag": "local"
+      }
+    ],
+    "final": "cloudflare"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 1280,
+      "stack": "system",
+      "auto_route": true,
+      "strict_route": true
+    }
+  ],
+  "endpoints": [
+    {
+      "type": "wireguard",
+      "tag": "nord.us1.edge5",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "d+ghQA4w0sioiZIPXKVsRyODn2vrTcXduQtWyDzr/ho=",
+      "peers": [
+        {
+          "address": "vpn.example.net",
+          "port": 51820,
+          "public_key": "O5U+DywAqPLSwtNO3Fld50IGnEvOwbbROxpr8bmz+5k=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "nord.us2.edge5",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "d+ghQA4w0sioiZIPXKVsRyODn2vrTcXduQtWyDzr/ho=",
+      "peers": [
+        {
+          "address": "5.6.7.8",
+          "port": 51820,
+          "public_key": "O5U+DywAqPLSwtNO3Fld50IGnEvOwbbROxpr8bmz+5k=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "warp.edge5",
+      "mtu": 1280,
+      "address": [
+        "172.16.0.2/32",
+        "2606:4700:110:8f::2/128"
+      ],
+      "private_key": "wAQfve7hwFsu+hM3G/teOY9Xvt3PwnxL4US2/5K1o04=",
+      "peers": [
+        {
+          "address": "162.159.192.1",
+          "port": 2408,
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "tunnel",
+      "outbounds": [
+        "nord.us1.edge5",
+        "nord.us2.edge5",
+        "warp.edge5"
+      ],
+      "default": "nord.us1.edge5"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "final": "tunnel",
+    "default_domain_resolver": "local",
+    "rules": [
+      {
+        "inbound": "tun-in",
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      }
+    ]
+  }
+}

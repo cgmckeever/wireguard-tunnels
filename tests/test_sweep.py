@@ -15,7 +15,7 @@ from .conftest import client
 
 
 def run(store, device: str) -> sweep.Sweep:
-    s = sweep.Sweep(store.path(f"devices/{device}"), for_singbox=True)
+    s = sweep.Sweep(store.path(f"devices/{device}"), app_column=False)
     with open(os.devnull, "w") as quiet:
         s.run(out=quiet)
     return s
@@ -99,7 +99,7 @@ def test_configs_as_the_sweep_leaves_them_without_writing(store):
     store.device("ph")
     store.put("devices/ph/carriers/srv.conf", client("srv"))
     store.put("devices/ph/config/srv.ph.conf", client("plain"))
-    planned = sweep.Sweep(store.path("devices/ph"), for_singbox=True)
+    planned = sweep.Sweep(store.path("devices/ph"), app_column=False)
     assert [c.name for c in planned.configs()] == ["srv.ph", "warp.ph", "warped.srv.ph"]
     assert not os.path.exists(store.path("devices/ph/config/warp.ph.conf"))
 
@@ -121,3 +121,36 @@ def test_resolve(store):
     assert sweep.resolve("") == store.path("devices/ph")
     with pytest.raises(Error, match="no folder"):
         sweep.resolve("/nonexistent")
+
+
+def test_a_broken_warp_profile_is_skipped(store):
+    store.device("ph")
+    store.put("devices/ph/warp/wgcf-profile.conf", "[Interface]\nPrivateKey = x\n[Peer]\nPublicKey = y\n")
+    rows = {r.name: r for r in run(store, "ph").rows}
+    assert (rows["warp.ph"].state, rows["warp.ph"].detail) == ("skipped", "warp/wgcf-profile.conf: no Address")
+    assert not os.path.exists(store.path("devices/ph/config/warp.ph.conf"))
+
+
+def test_small_carrier_mtu_note(store):
+    store.device("ph")
+    store.put("devices/ph/carriers/srv.conf", client("srv", mtu=1300))
+    rows = {r.name: r for r in run(store, "ph").rows}
+    assert rows["warped.srv.ph"].notes == ["carrier MTU 1300: WARP runs at 1220 inside (IPv6 and QUIC fall back)"]
+    assert rows["warp.ph"].notes == []
+
+
+def test_cli(store, capsys):
+    assert sweep.main(["-h"]) == 0
+    assert capsys.readouterr().out.startswith("wgwarp-sweep.sh — ")
+    for args in (["-x"], ["a", "b"]):
+        with pytest.raises(SystemExit):
+            sweep.main(args)
+        assert "usage: wgwarp-sweep.sh" in capsys.readouterr().err
+    store.device("ph")
+    store.put("devices/ph/carriers/srv.conf", "\xff not utf-8")
+    os.chmod(store.path("devices/ph/carriers"), 0o700)
+    with open(store.path("devices/ph/carriers/srv.conf"), "wb") as f:
+        f.write(b"\xff\xfe")
+    with pytest.raises(SystemExit):
+        sweep.main(["ph"])
+    assert capsys.readouterr().err.startswith("wgwarp-sweep.sh: ")     # a line, not a traceback

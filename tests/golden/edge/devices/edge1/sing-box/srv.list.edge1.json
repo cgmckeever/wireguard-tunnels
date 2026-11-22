@@ -1,0 +1,105 @@
+{
+  "log": {
+    "level": "warn"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "cloudflare",
+        "server": "1.1.1.1",
+        "detour": "tunnel"
+      },
+      {
+        "type": "local",
+        "tag": "local"
+      }
+    ],
+    "final": "cloudflare"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 1420,
+      "stack": "system",
+      "auto_route": true,
+      "strict_route": true
+    }
+  ],
+  "endpoints": [
+    {
+      "type": "wireguard",
+      "tag": "srv.full.edge1",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "oYuGmy6BwMUpVSo8T6XJLtCLmKThRq7XeNcdJ1F/g6w=",
+      "peers": [
+        {
+          "address": "vpn.example.net",
+          "port": 51820,
+          "public_key": "P6TW9xU+GUgWENIk2L0f/ubg0hT0VANksT55YlShUHg=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ],
+          "pre_shared_key": "sEmNp8VEEWb4EHpSs644YlXMA+wmHotYnBCk2W85FMY="
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "srv.zz.edge1",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "SmC/fUvB5IV0TPfo0IYFJHUvyhzkIzG+fEOf0jBD8VE=",
+      "peers": [
+        {
+          "address": "vpn.example.net",
+          "port": 51820,
+          "public_key": "dpE28olfvxVVbZfjjALPhgjZ1/hpyEDAQjSOc7l+43A=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "tunnel",
+      "outbounds": [
+        "srv.full.edge1",
+        "srv.zz.edge1"
+      ],
+      "default": "srv.full.edge1"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "final": "tunnel",
+    "default_domain_resolver": "local",
+    "rules": [
+      {
+        "inbound": "tun-in",
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      }
+    ]
+  }
+}

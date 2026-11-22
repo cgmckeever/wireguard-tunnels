@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-from typing import Optional
+from typing import Iterator, Optional
 
 import pytest
 
@@ -70,9 +70,10 @@ class Store:
 
 
 @pytest.fixture
-def store(tmp_path, monkeypatch) -> Store:
+def store(tmp_path, monkeypatch) -> Iterator[Store]:
     root = str(tmp_path / "wg-tunnels")
     os.makedirs(os.path.join(root, "devices"), mode=0o700)
     monkeypatch.setenv("WG_TUNNELS", root)
-    os.umask(0o077)
-    return Store(root)
+    old = os.umask(0o077)       # as the scripts' main()s set it
+    yield Store(root)
+    os.umask(old)

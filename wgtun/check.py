@@ -6,7 +6,8 @@ Usage:
   check.sh <device>...    just those
 
 For each device:
-  - every config in carriers/, config/ and warp/ is a usable one-peer config
+  - every config in carriers/ and config/, and warp/wgcf-profile.conf, is a
+    usable one-peer config
   - every file is 0600 and every folder 0700 (they hold private keys)
   - every config/ tunnel has a keepalive: the WireGuard app (qr.sh), tunnel.sh
     and sing-box all use config/ as it is, so one without has none anywhere
@@ -42,13 +43,12 @@ def check_device(name: str) -> Found:
     found: Found = []
     d = os.path.join(store.devices_dir(), name)
     folders = [d] + [os.path.join(d, s) for s in ("carriers", "config", "warp", "sing-box")]
-    confs = store.confs_in(folders[1]) + store.confs_in(folders[2])
+    confs = store.files_in(folders[1]) + store.files_in(folders[2])
     profile = os.path.join(d, "warp", "wgcf-profile.conf")
     if os.path.isfile(profile):
         confs.append(profile)
     profiles = folders[4]
-    jsons = [os.path.join(profiles, f) for f in os.listdir(profiles) if f.endswith(".json")] \
-        if os.path.isdir(profiles) else []
+    jsons = store.files_in(profiles, ".json")
 
     def label(path: str) -> str:
         return os.path.relpath(path, d)
@@ -70,14 +70,14 @@ def check_device(name: str) -> Found:
 
     fix = f"run singbox.sh build {name}" if os.path.isdir(profiles) else f"run wgwarp-sweep.sh {name}"
     try:
-        swept = sweep.Sweep(d, for_singbox=True)
+        swept = sweep.Sweep(d, app_column=False)
     except Error as e:
         return found + [("error", f"the sweep would stop: {e}")]
     for r in swept.written():
         if r.state != "unchanged":
             found.append(("error", f"{label(r.path)} is {'missing' if r.state == 'new' else 'out of date'}: {fix}"))
-    dev = singbox.Device(name, "build")
     try:
+        dev = singbox.Device(name, "build")
         singbox.check_keys(dev, swept.configs(), quiet)    # wherever the device runs them
     except Error as e:
         return found + [("error", str(e))]
@@ -106,16 +106,24 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not names:
         store.die("check.sh", f"no devices in {store.devices_dir()}")
     errors = 0
-    for name in names:
-        if not os.path.isdir(os.path.join(store.devices_dir(), name)):
-            store.die("check.sh", f"no device {name}")
-        found = check_device(name)
-        errors += sum(1 for kind, _ in found if kind == "error")
-        print(f"{name:<20} {'ok' if not found else ''}".rstrip())
-        for kind, what in found:
-            print(f"  {kind}: " + what.replace("\n", "\n    "))
+    try:
+        for name in names:
+            errors += report(name)
+    except store.FAILURES as e:
+        store.die("check.sh", str(e))
     print(f"\n{errors} error{'s' * (errors != 1)} in {len(names)} device{'s' * (len(names) != 1)}")
     return 1 if errors else 0
+
+
+def report(name: str) -> int:
+    """Print what's wrong with a device; how many errors."""
+    if not os.path.isdir(os.path.join(store.devices_dir(), name)):
+        raise Error(f"no device {name}")
+    found = check_device(name)
+    print(f"{name:<20} {'ok' if not found else ''}".rstrip())
+    for kind, what in found:
+        print(f"  {kind}: " + what.replace("\n", "\n    "))
+    return sum(1 for kind, _ in found if kind == "error")
 
 
 if __name__ == "__main__":

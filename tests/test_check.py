@@ -62,3 +62,16 @@ def test_main_exit(store, capsys):
     store.put("devices/ph/sing-box/extra.json", "{}\n")
     assert check.main(["ph"]) == 1
     assert "1 error in 1 device" in capsys.readouterr().out
+
+
+def test_a_dotfile_isnt_a_profile(store):
+    built_phone(store)
+    store.put("devices/ph/sing-box/.ph.json.tmp.json", "{}\n")
+    assert check.check_device("ph") == []
+
+
+def test_a_device_name_build_cant_take(store):
+    store.device("my phone", carriers=False, warp=False)
+    store.put("devices/my phone/config/srv.conf", client("srv"))
+    assert check.check_device("my phone") == [
+        ("error", "device names are letters, digits, . _ - (not starting with .)")]

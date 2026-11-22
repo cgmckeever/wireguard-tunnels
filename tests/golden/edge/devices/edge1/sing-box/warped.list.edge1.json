@@ -1,0 +1,309 @@
+{
+  "log": {
+    "level": "warn"
+  },
+  "dns": {
+    "servers": [
+      {
+        "type": "udp",
+        "tag": "cloudflare",
+        "server": "1.1.1.1",
+        "detour": "tunnel"
+      },
+      {
+        "type": "local",
+        "tag": "local"
+      }
+    ],
+    "final": "cloudflare"
+  },
+  "inbounds": [
+    {
+      "type": "tun",
+      "tag": "tun-in",
+      "address": [
+        "172.19.0.1/30",
+        "fdfe:dcba:9876::1/126"
+      ],
+      "mtu": 1220,
+      "stack": "system",
+      "auto_route": true,
+      "strict_route": true
+    }
+  ],
+  "endpoints": [
+    {
+      "type": "wireguard",
+      "tag": "carrier.open.edge1",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "I0j5mHRCElddhZWWdPlgerJvZ3CKkXFXRygyOGM3yQQ=",
+      "peers": [
+        {
+          "address": "vpn.example.net",
+          "port": 51820,
+          "public_key": "ok4vrwxPkcmRYNXm+WUzrieMsyOMZ3EBR+6VzfCY5ds=",
+          "allowed_ips": [
+            "162.159.192.7/32"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "warped.open.edge1",
+      "mtu": 1280,
+      "address": [
+        "172.16.0.2/32",
+        "2606:4700:110:8f::2/128"
+      ],
+      "private_key": "YwJrviVZEEuMEcvrh3OuHiKPQijHoX8WQ7KOMv5IsDw=",
+      "detour": "carrier.open.edge1",
+      "peers": [
+        {
+          "address": "162.159.192.7",
+          "port": 2408,
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "carrier.q.edge1",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "jjXCzTv2ZBvbDiBQt2kyy7LmA0oN2swdm+qCprpX988=",
+      "peers": [
+        {
+          "address": "vpn.example.net",
+          "port": 51820,
+          "public_key": "1wv4/hkJE5yubBoD5YCjwRtcJy9J4UsgEhB5+9edbTo=",
+          "allowed_ips": [
+            "162.159.192.7/32"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "warped.q.edge1",
+      "mtu": 1280,
+      "address": [
+        "172.16.0.2/32",
+        "2606:4700:110:8f::2/128"
+      ],
+      "private_key": "YwJrviVZEEuMEcvrh3OuHiKPQijHoX8WQ7KOMv5IsDw=",
+      "detour": "carrier.q.edge1",
+      "peers": [
+        {
+          "address": "162.159.192.7",
+          "port": 2408,
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "carrier.x.edge1",
+      "mtu": 1300,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "LXEWQrcmsEQBYnyp+6wy9chTD7GQPMTbAiWHF5IaSIE=",
+      "peers": [
+        {
+          "address": "vpn.example.net",
+          "port": 51820,
+          "public_key": "cpbP19gScmoludfFgrk3ODifpmMozdR8xn2/mPH/aKE=",
+          "allowed_ips": [
+            "162.159.192.7/32",
+            "10.9.8.0/24",
+            "192.168.5.0/24",
+            "fd00:1::/48"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "warped.x.edge1",
+      "mtu": 1220,
+      "address": [
+        "172.16.0.2/32",
+        "2606:4700:110:8f::2/128"
+      ],
+      "private_key": "YwJrviVZEEuMEcvrh3OuHiKPQijHoX8WQ7KOMv5IsDw=",
+      "detour": "carrier.x.edge1",
+      "peers": [
+        {
+          "address": "162.159.192.7",
+          "port": 2408,
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "carrier.y.edge1",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "ofzkNjhU/4iM/0uOeHXWAMJoI5BBKoz3mzfQsRFIsPo=",
+      "peers": [
+        {
+          "address": "vpn.example.net",
+          "port": 51820,
+          "public_key": "Ekg849JbNXaNZm0ct2a6IoHs4x68tO5CTEYWgX4poHw=",
+          "allowed_ips": [
+            "162.159.192.7/32"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "warped.y.edge1",
+      "mtu": 1280,
+      "address": [
+        "172.16.0.2/32",
+        "2606:4700:110:8f::2/128"
+      ],
+      "private_key": "YwJrviVZEEuMEcvrh3OuHiKPQijHoX8WQ7KOMv5IsDw=",
+      "detour": "carrier.y.edge1",
+      "peers": [
+        {
+          "address": "162.159.192.7",
+          "port": 2408,
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "carrier.z.edge1",
+      "mtu": 1420,
+      "address": [
+        "10.0.0.2/32",
+        "fd00::2/128"
+      ],
+      "private_key": "WU5RmuSZMSspQzt92Kl/8Gje/LqXVbbV0A6ExSTWewY=",
+      "peers": [
+        {
+          "address": "2001:db8::1",
+          "port": 51820,
+          "public_key": "4li+sPQXgdoblhxtEYuyKOZivvkg7q+9q5bRHKkHHlA=",
+          "allowed_ips": [
+            "162.159.192.7/32"
+          ],
+          "pre_shared_key": "kbMNUGx+vZZeIwRSRxrc96g800LsRu2duioigMerA+Q="
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "warped.z.edge1",
+      "mtu": 1280,
+      "address": [
+        "172.16.0.2/32",
+        "2606:4700:110:8f::2/128"
+      ],
+      "private_key": "YwJrviVZEEuMEcvrh3OuHiKPQijHoX8WQ7KOMv5IsDw=",
+      "detour": "carrier.z.edge1",
+      "peers": [
+        {
+          "address": "162.159.192.7",
+          "port": 2408,
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    },
+    {
+      "type": "wireguard",
+      "tag": "warp.edge1",
+      "mtu": 1280,
+      "address": [
+        "172.16.0.2/32",
+        "2606:4700:110:8f::2/128"
+      ],
+      "private_key": "YwJrviVZEEuMEcvrh3OuHiKPQijHoX8WQ7KOMv5IsDw=",
+      "peers": [
+        {
+          "address": "162.159.192.7",
+          "port": 2408,
+          "public_key": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+          "allowed_ips": [
+            "0.0.0.0/0",
+            "::/0"
+          ]
+        }
+      ]
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "selector",
+      "tag": "tunnel",
+      "outbounds": [
+        "warped.open.edge1",
+        "warped.q.edge1",
+        "warped.x.edge1",
+        "warped.y.edge1",
+        "warped.z.edge1",
+        "warp.edge1"
+      ],
+      "default": "warped.open.edge1"
+    }
+  ],
+  "route": {
+    "auto_detect_interface": true,
+    "final": "tunnel",
+    "default_domain_resolver": "local",
+    "rules": [
+      {
+        "inbound": "tun-in",
+        "action": "sniff"
+      },
+      {
+        "protocol": "dns",
+        "action": "hijack-dns"
+      },
+      {
+        "ip_cidr": [
+          "10.9.8.0/24",
+          "192.168.5.0/24",
+          "fd00:1::/48"
+        ],
+        "outbound": "carrier.x.edge1"
+      }
+    ]
+  }
+}

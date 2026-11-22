@@ -17,7 +17,7 @@ KA = "persistent_keepalive_interval"
 def build(store, device: str):
     """(profiles by file name, parsed; what build said)"""
     said = []
-    swept = sweep.Sweep(store.path(f"devices/{device}"), for_singbox=True)
+    swept = sweep.Sweep(store.path(f"devices/{device}"), app_column=False)
     files = singbox.plan(singbox.Device(device, "build"), swept, lambda text, err: said.append(text))
     return {f: json.loads(t) for f, t in files.items()}, said
 
@@ -47,21 +47,22 @@ def test_files(phone):
 
 
 def test_singles_keep_their_configs_keepalives_groups_have_none(phone):
-    """The rule: a tunnel's keepalive is its config/ file's, in every one-tunnel
-    profile (WARP's from warp.<device>.conf); a group runs every tunnel at once,
-    so it has none."""
+    """The rule: a tunnel's keepalive is its config/ file's in every one-tunnel
+    profile (the sweep gives warped and WARP 25); a group runs every tunnel at
+    once, so it has none."""
     files, _ = build(phone, "ph")
-    config = {c.name: c for c in sweep.Sweep(phone.path("devices/ph"), for_singbox=True).configs()}
-    for f, p in files.items():
-        if len(picks(p)) > 1:
-            assert set(keepalives(p).values()) == {None}, f
-            continue
-        for tag, ka in keepalives(p).items():
-            source = config["warp.ph"] if tag == picks(p)[0] and tag.startswith("warped.") else \
-                config[tag.replace("carrier.", "warped.")]
-            assert ka == (source.keepalive() or None), (f, tag)
-    assert keepalives(files["warp.ph.json"]) == {"warp.ph": 25}
     assert keepalives(files["dengar.chi.ph.json"]) == {"dengar.chi.ph": 30}
+    assert keepalives(files["dengar.ph.json"]) == {"dengar.ph": 25}
+    assert keepalives(files["warp.ph.json"]) == {"warp.ph": 25}
+    assert keepalives(files["warped.proton.chi.ph.json"]) == {"carrier.proton.chi.ph": 25, "warped.proton.chi.ph": 25}
+    for f in ("ph.json", "warped.list.ph.json", "dengar.list.ph.json"):
+        assert set(keepalives(files[f]).values()) == {None}, f
+
+
+def test_a_config_without_a_keepalive_has_none_in_its_profile(phone):
+    phone.put("devices/ph/config/home.ph.conf", client("home", keepalive=None))
+    files, _ = build(phone, "ph")
+    assert keepalives(files["home.ph.json"]) == {"home.ph": None}
 
 
 def test_warped_rides_its_carrier(phone):
@@ -147,3 +148,27 @@ def test_cmd_build_writes_and_removes(phone, capsys):
     assert "ph.json                                          new" in out
     singbox.cmd_build("ph")
     assert "new" not in capsys.readouterr().out.split("== Profiles")[1].split("\n\n")[0]
+
+
+def test_a_broken_warp_profile_isnt_built(phone, capsys):
+    phone.put("devices/ph/warp/wgcf-profile.conf", "[Interface]\nPrivateKey = x\n")
+    files, said = build(phone, "ph")
+    assert "warp.ph.json" not in files
+    assert "skipped warped.proton.chi.ph: no WARP profile" in said
+    with pytest.raises(Error, match="WARP profile .*: no \\[Peer\\]|WARP profile .*: 0 \\[Peer\\]"):
+        singbox.cmd_build("ph")
+
+
+def test_cli(store, capsys):
+    assert singbox.main(["--help"]) == 0
+    assert "singbox.sh build <device>" in capsys.readouterr().out
+    assert singbox.main(["nope"]) == 1
+    with pytest.raises(SystemExit):
+        singbox.main(["build", "bad name"])
+    assert "device names are letters" in capsys.readouterr().err
+
+
+def test_list(phone, capsys):
+    phone.put("devices/.default", "ph\n")
+    singbox.cmd_list()
+    assert capsys.readouterr().out.split("\n")[1].split() == ["ph", "(this", "Mac)", "1", "2", "yes", "0"]
