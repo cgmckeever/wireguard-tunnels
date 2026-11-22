@@ -2,6 +2,8 @@
 # scripts are: /bin/bash 3.2, /usr/bin/python3 3.9, macOS's own tools.
 name: tests
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   test:
     runs-on: macos-latest

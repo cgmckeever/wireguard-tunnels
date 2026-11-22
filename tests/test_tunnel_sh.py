@@ -147,3 +147,8 @@ def test_ipv6_found_on_any_address_line():
     check = "list_of \"$1\" Address | grep -q ':'"
     assert bash(functions("conf_vals", "list_of"), check, conf).returncode == 0
     assert check.replace('"$1"', '"$CONF/$1.conf"') in source()      # what take_traffic runs
+
+
+def test_qr_sh_knows_a_warped_tunnel_by_the_same_prefix():
+    with open(os.path.join(store.SCRIPTS, "qr.sh"), encoding="utf-8") as f:
+        assert f"    {store.WARPED}*)" in f.read()

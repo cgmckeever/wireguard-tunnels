@@ -207,7 +207,7 @@ fi
 # goes to curl as a config file (a pipe), never as an argument: any user on
 # the Mac can read another's arguments in ps.
 key=$(api users/services/credentials --config <(printf 'user = "token:%s"\n' "$(tr -d ' \t\r\n"' < "$TOKEN_FILE")") \
-    | jq -r '.nordlynx_private_key // empty') || die "no NordLynx key (is the token in $TOKEN_FILE still valid?)"
+    | jq -r '.nordlynx_private_key // empty') || exit 1      # api said why
 [ -n "$key" ] || die "no NordLynx key (is the token in $TOKEN_FILE still valid?)"
 
 # 9. Write it (only if it changed)
@@ -241,8 +241,9 @@ note=""
 echo "$out: $state, $host, $place$note"
 
 echo
+this="$HERE/tunnel.sh import (this Mac"; [ "$holder" = "$MAC" ] || this=""
 case "$kind/$role" in
     server/*)       echo "Next: wgt-ctl $holder jump-add   (adds it to $holder as jump $code)" ;;
-    device/carrier) echo "Next: $HERE/tunnel.sh import (this Mac; it sweeps carriers/ first) or $HERE/singbox.sh build $holder" ;;
-    device/config)  echo "Next: $HERE/tunnel.sh import (this Mac), $HERE/singbox.sh build $holder, or $HERE/qr.sh $holder $name" ;;
+    device/carrier) echo "Next: ${this:+$this; it sweeps carriers/ first) or }$HERE/singbox.sh build $holder" ;;
+    device/config)  echo "Next: ${this:+$this), }$HERE/singbox.sh build $holder, or $HERE/qr.sh $holder $name" ;;
 esac

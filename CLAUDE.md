@@ -63,6 +63,6 @@ the behavior; this file says how to change it without tangling it again.
 | `wgtun/forinstall.py` | `install.sh`'s store steps: device names, the WARP endpoint, folders, the WARP account, the daemon's `warp.conf` |
 | `scripts/tunnel.sh` | The daemon and this Mac's CLI (standalone bash) |
 | `scripts/_lib.sh` | What `nord.sh`, `qr.sh` and `install.sh` share |
-| `scripts/nord.sh`, `qr.sh`, `wgtun.sh`, `swiftbar/` | Nord configs, QR codes, the one entry point, the menu bar plugin |
+| `scripts/nord.sh`, `qr.sh`, `wgtun.sh`, `swiftbar/`, `askpass.sh` | Nord configs, QR codes, the one entry point, the menu bar plugin, its sudo password dialog |
 | `tests/` | pytest; `golden/` is the recorded shell output |
 | `.githooks/pre-commit`, `.github/workflows/tests.yml` | Both run `./test.sh all` |

@@ -52,7 +52,7 @@ while [ $# -gt 0 ]; do
         --sing-box)  singbox_only=1 ;;
         --device)    [ -n "${2:-}" ] && [[ "$2" != -* ]] || die "--device needs a name (see --help)"
                      device="$2"; shift ;;
-        --device=*)  device="${1#--device=}" ;;
+        --device=*)  device="${1#--device=}"; [ -n "$device" ] || die "--device needs a name (see --help)" ;;
         -h|--help)   usage; exit 0 ;;
         *) die "Unknown option: $1 (see --help)" ;;
     esac

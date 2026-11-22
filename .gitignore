@@ -1,8 +1,11 @@
-# Never commit tunnel configs, WARP accounts or exports: they hold private keys
+# Never commit tunnel configs, WARP accounts, exports, sing-box profiles or the
+# Nord token: they hold private keys (a store kept inside the repo, say)
 *.conf
 *.zip
 *.toml
 !pyproject.toml
+sing-box/
+.nord-token
 .DS_Store
 
 # The test and lint tools (test.sh makes it)
@@ -14,3 +17,4 @@ __pycache__/
 
 # Test fixtures: fake keys only
 !tests/golden/**/*.conf
+!tests/golden/**/sing-box/

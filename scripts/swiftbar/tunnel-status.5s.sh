@@ -8,7 +8,8 @@
 #   pause, blue               paused: down with no kill switch until a set time
 #   open lock, grey           no VPN
 #   triangle, red             the daemon isn't answering
-# Reads /var/run/wg-tunnels/status (written by tunnel.sh's daemon).
+# Reads what tunnel.sh's daemon writes in /var/run/wg-tunnels/ (status,
+# current, progress) and its tunnels.tsv.
 # The menu switches tunnels in the background: sudo asks with a dialog
 # (askpass.sh) and a notification says how it went.
 #
@@ -384,7 +385,7 @@ echo "--Rotate WARP Keys | bash=\"$SELF\" param1=run param2=rotate-warp terminal
 # The daemon is a copy of the repo's tunnel.sh: flag it when a git pull changed that
 if [ ! -x /usr/local/sbin/wg-tunnels ]; then
     echo "--Install Daemon (not installed) | bash=\"$SELF\" param1=run param2=update terminal=false refresh=true"
-elif cmp -s "$TUNNEL" /usr/local/sbin/wg-tunnels; then
+elif cmp -s "$TUNNEL" /usr/local/sbin/wg-tunnels && [ -f /Library/LaunchDaemons/com.local.wg-tunnels.plist ]; then   # as tunnel.sh update judges it
     echo "--Update Daemon | bash=\"$SELF\" param1=run param2=update terminal=false refresh=true"
 else
     echo "--Update Daemon (out of date) | bash=\"$SELF\" param1=run param2=update terminal=false refresh=true"
