@@ -1443,8 +1443,16 @@ status() {
 # is replaced, and ones not in the zip are removed. The zip is kept. Configs
 # wireguard-tools issued ("# wireguard-tools client:" line) are left alone:
 # they're wgt-ctl's to replace, and the app's export drops that line.
+# A config wireguard-tools issued, which extract keeps: it has the tools'
+# line. A warped.* one has it too (copied from its carrier), but it's the
+# sweep's: it goes like the rest, and the next import writes it again.
+tools_copy() {
+    case "$(basename "$1")" in "$TUNNEL_PREFIX"*) return 1 ;; esac
+    grep -q "^# wireguard-tools client:" "$1"
+}
+
 cmd_extract() {
-    local zip="${1:-}" tmp f name n=0 rc dir exports configs mark="# wireguard-tools client:"
+    local zip="${1:-}" tmp f name n=0 rc dir exports configs
     dir=$(mac_dir) || exit 1
     exports="$dir/exports" configs="$dir/config"
     if [ -z "$zip" ]; then
@@ -1464,7 +1472,7 @@ cmd_extract() {
     echo "Extracting ${zip} into ${configs}"
     for f in "$tmp"/*.conf; do
         name=$(basename "$f")
-        if [ -f "$configs/$name" ] && grep -q "^$mark" "$configs/$name"; then
+        if [ -f "$configs/$name" ] && tools_copy "$configs/$name"; then
             echo "  ${name%.conf}: kept (wireguard-tools' copy)"; rm -f "$f"
         elif [ ! -f "$configs/$name" ]; then echo "  ${name%.conf}: new"
         elif cmp -s "$f" "$configs/$name"; then echo "  ${name%.conf}: unchanged"
@@ -1474,7 +1482,7 @@ cmd_extract() {
         [ -f "$f" ] || continue
         name=$(basename "$f")
         [ -f "$tmp/$name" ] && continue
-        grep -q "^$mark" "$f" && continue
+        tools_copy "$f" && continue
         echo "  ${name%.conf}: removed (not in the zip)"
         rm -f "$f"
     done

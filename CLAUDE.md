@@ -15,13 +15,16 @@ the behavior; this file says how to change it without tangling it again.
     runs every tunnel at once.
 - **Ownership goes by name.**
   - The sweep writes `config/warped.*` and `config/warp.<device>.conf`.
-  - wireguard-tools writes `<server>.<config>.conf` and never touches
-    `warped.*`.
+  - wireguard-tools writes `<server>.<config>.conf`, and never touches
+    `warped.*` or `warp.<device>.conf` (in any case). It delivers them after
+    a client change, `device rename`, `sync`, `setup`, `restore` and `move`.
   - `nord.sh` writes `nord.<cc>[.<city>].conf`, and rewrites only a file
     with a `# source: nord` line.
   - `tunnel.sh extract` is the exception that goes by a line, not a name: it
     replaces this Mac's `config/` from a WireGuard-app export zip, keeping
-    only files with a `# wireguard-tools client:` line.
+    only files with a `# wireguard-tools client:` line. A `warped.*` file
+    has that line too (copied from its carrier), but it's the sweep's:
+    extract replaces it like the rest.
   - Nothing else in `config/` is ours to rewrite.
 - **`tunnel.sh` stays one standalone bash file.** It's the root daemon,
   copied to `/usr/local/sbin/wg-tunnels`, so it must never source or import

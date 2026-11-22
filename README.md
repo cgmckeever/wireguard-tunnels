@@ -869,12 +869,12 @@ first creates `~/wg-tunnels`, and both read its location from `$WG_TUNNELS`
 replace: the live copy is on the server, and `wgt-ctl sync` puts it back.
 Nothing here changes, renames or deletes one. The sweep writes only
 `warped.*` and `warp.<device>.conf`, names wireguard-tools never gives a file
-(it names its own `<server>.<config>.conf` and leaves `warped.*` alone), so
+(it names its own `<server>.<config>.conf` and leaves both alone, in any case), so
 the two can't write over each other. A warped tunnel made from a
 wireguard-tools carrier keeps its `# wireguard-tools client:` line; that's
 fine, both sides go by the name. `tunnel.sh extract` goes by that line
 instead: it keeps a config that has it (the WireGuard app's export drops
-it), and replaces the rest from the zip.
+it), except a `warped.*` one, and replaces the rest from the zip.
 
 **Who writes what in `config/`.** wireguard-tools, `nord.sh` and the sweep
 each write a tunnel with `PersistentKeepalive = 25`, and the WireGuard app,

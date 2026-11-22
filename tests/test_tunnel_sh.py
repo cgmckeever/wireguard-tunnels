@@ -152,3 +152,17 @@ def test_ipv6_found_on_any_address_line():
 def test_qr_sh_knows_a_warped_tunnel_by_the_same_prefix():
     with open(os.path.join(store.SCRIPTS, "qr.sh"), encoding="utf-8") as f:
         assert f"    {store.WARPED}*)" in f.read()
+
+
+TOOLS_LINE = "# wireguard-tools client: mbp-1 on dengar"
+
+
+@pytest.mark.parametrize("name,line,kept", [("dengar.mbp-1.conf", TOOLS_LINE, True),
+                                            ("warped.dengar.mbp-1.conf", TOOLS_LINE, False),
+                                            ("nord.us.conf", "# source: nord us", False)])
+def test_extract_keeps_only_wireguard_tools_own(tmp_path, name, line, kept):
+    """A warped.* config carries its carrier's tools line, but it's the sweep's to write."""
+    path = tmp_path / name
+    path.write_text(f"{line}\n[Interface]\n")
+    call = f'TUNNEL_PREFIX={store.WARPED}; tools_copy "$1"'
+    assert (bash(functions("tools_copy"), call, str(path)).returncode == 0) == kept
