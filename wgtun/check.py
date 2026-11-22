@@ -22,7 +22,6 @@ Exits 1 when anything is wrong; warnings alone don't count.
 from __future__ import annotations
 
 import os
-import stat
 import sys
 from typing import List, Optional, Tuple
 
@@ -37,21 +36,17 @@ def quiet(_text: str, _err: bool = False) -> None:
     """build's own warnings: the check says its own (or they're the user's call)."""
 
 
-def mode(path: str) -> int:
-    return stat.S_IMODE(os.stat(path).st_mode)
-
-
 def modes(f: store.Folder) -> Found:
     found: Found = []
     for d in (d for d in (f.dir, *f.private) if os.path.isdir(d)):
-        m = mode(d)
+        m = store.mode(d)
         if m != 0o700:
             found.append(("error", f"{os.path.relpath(d, f.dir)}/ is {m:o}, should be 700"))
     for d in (d for d in f.private if os.path.isdir(d)):
         for name in store.collated(n for n in os.listdir(d) if n != ".DS_Store"):     # Finder's, not ours
             path = os.path.join(d, name)
-            if os.path.isfile(path) and mode(path) != 0o600:
-                found.append(("error", f"{os.path.relpath(path, f.dir)} is {mode(path):o}, should be 600"))
+            if os.path.isfile(path) and store.mode(path) != 0o600:
+                found.append(("error", f"{os.path.relpath(path, f.dir)} is {store.mode(path):o}, should be 600"))
     return found
 
 
@@ -59,7 +54,7 @@ def check_device(name: str) -> Found:
     f = store.Folder.of(name)
     found = modes(f)
     broken = set()                     # configs already reported: the sweep or build skips them
-    unreadable = False                 # one the sweep would stop at
+    unreadable = False                 # one the sweep or build would stop at
     for path in f.confs():
         try:
             c = Conf.read(path)
@@ -74,7 +69,7 @@ def check_device(name: str) -> Found:
         elif os.path.dirname(path) == f.config and not c.keepalive():
             found.append(("warning", f"{os.path.relpath(path, f.dir)}: no PersistentKeepalive, so none in the "
                                      "WireGuard app, tunnel.sh or its sing-box profile either"))
-    if unreadable:                     # the sweep would stop at it too: said once
+    if unreadable:                     # the sweep or build would stop at it too: said once
         return found
     try:
         found += up_to_date(f, broken)
@@ -122,7 +117,8 @@ def up_to_date(f: store.Folder, broken: set) -> Found:
 def report(name: str) -> int:
     """Print what's wrong with a device; how many errors."""
     try:
-        found = check_device(name) if os.path.isdir(store.device_dir(name)) else [("error", f"no device {name}")]
+        real = store.valid_device(name) and os.path.isdir(store.device_dir(name))
+        found = check_device(name) if real else [("error", f"no device {name}")]
     except store.FAILURES as e:        # one it can't finish (a folder it can't read): the rest go on
         found = [("error", str(e))]
     print(f"{name:<20} {'ok' if not found else ''}".rstrip())

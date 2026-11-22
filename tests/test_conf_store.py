@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from wgtun import store
@@ -29,7 +31,11 @@ def test_keepalive_mtu_endpoint():
     (client("a") + "[Peer]\nPublicKey = y\n", "2 [Peer] sections, needs one"),
     (client("a").replace("PublicKey", "#"), "no PublicKey"),
     (client("a").replace("51820", "port"), "Endpoint isn't host:port"),
-    (client("a", mtu=1280).replace("1280", "big"), "MTU isn't a number"),
+    (client("a", mtu=1280).replace("1280", "big"), "MTU isn't a number from 576 to 65535"),
+    (client("a", mtu=0), ""),                                   # no MTU line: client() writes none for 0
+    (client("a", mtu=1280).replace("1280", "0"), "MTU isn't a number from 576 to 65535"),
+    (client("a").replace("51820", "99999999"), "Endpoint isn't host:port"),
+    (client("a").replace("51820", "0"), "Endpoint isn't host:port"),
     (client("a"), ""),
 ])
 def test_problem(text, why):
@@ -76,8 +82,6 @@ def test_warp_endpoint_device_then_store_then_cloudflare(store_root):
         store.warp_endpoint(dev)
 
 
-
-
 def test_sweep_owned_by_name():
     assert store.sweep_owned("warped.x.iphone", "iphone")
     assert store.sweep_owned("warp.iphone", "iphone")
@@ -116,4 +120,19 @@ def test_keepalive_as_wg_quick_reads_it(line, ka):
 
 
 def test_a_number_is_ascii_digits():
-    assert Conf(client("a", mtu=1280).replace("1280", "¹²⁸⁰")).problem() == "MTU isn't a number"
+    assert Conf(client("a", mtu=1280).replace("1280", "¹²⁸⁰")).problem() == "MTU isn't a number from 576 to 65535"
+
+
+def test_files_in_is_files(tmp_path):
+    (tmp_path / "x.conf").mkdir()
+    (tmp_path / "y.conf").write_text("")
+    assert [os.path.basename(p) for p in store.files_in(str(tmp_path))] == ["y.conf"]
+
+
+def test_write_private_leaves_nothing_when_it_fails(tmp_path, monkeypatch):
+    def broken(_src, _dst):
+        raise OSError("disk full")
+    monkeypatch.setattr(os, "replace", broken)
+    with pytest.raises(OSError):
+        store.write_private(str(tmp_path / "a.conf"), "x")
+    assert os.listdir(tmp_path) == []

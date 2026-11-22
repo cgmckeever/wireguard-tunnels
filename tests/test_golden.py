@@ -48,10 +48,7 @@ def run(label: str, main, args) -> str:
     """One run as the shell's was recorded: its exit code, stdout, stderr."""
     out, err = io.StringIO(), io.StringIO()
     with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        try:
-            code = main(args)
-        except SystemExit as e:
-            code = e.code
+        code = main(args)
     return f"### {label} (exit {code})\n{out.getvalue()}--- stderr\n{err.getvalue()}"
 
 
@@ -62,6 +59,7 @@ def ran(tmp_path, monkeypatch) -> tuple:
     edge_store.make(root)
     monkeypatch.setenv("WG_TUNNELS", root)
     monkeypatch.setenv("LC_ALL", "en_US.UTF-8")      # the collation the goldens were made in
+    monkeypatch.setattr(sweep, "command", lambda argv: "")   # no WireGuard app here: as recorded
     old = os.umask(0o022)                             # a terminal's: each main() sets its own
     try:
         said = [run("sweep-default", sweep.main, [])]

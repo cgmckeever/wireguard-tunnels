@@ -105,8 +105,8 @@ def carrier_notes(carrier: Conf, found: Dict[str, List[str]], warp_mtu: int) -> 
         ("kept", "also carries {}"),
         ("wide", "ignored, too wide (would bypass WARP): {}"),
         ("bad", "ignored, not an address: {}")) if found[v]]
-    # WARP needs 1280 inside (IPv6's minimum): a carrier too small for that
-    # plus its overhead makes tunnel.sh and singbox.sh run WARP smaller
+    # A carrier too small for WARP's MTU (the profile's) plus its overhead
+    # makes tunnel.sh and singbox.sh run WARP smaller
     mtu = carrier.mtu(0)
     inner = store.inner_mtu(mtu, warp_mtu)
     if mtu and inner < warp_mtu:
@@ -130,8 +130,10 @@ def render_warped(carrier: Conf, warp_net: str, kept: List[str]) -> str:
 
     def allowed_once(_line: str) -> List[str]:
         nonlocal first
-        line, first = ([allowed] if first else []), False
-        return line
+        if not first:
+            return []
+        first = False
+        return [allowed]
 
     return carrier.rewrite({
         "DNS": drop,

@@ -77,7 +77,7 @@ def test_a_device_name_build_cant_take(tmp_store):
     assert check.check_device("my phone") == []
     os.makedirs(tmp_store.path("devices/my phone/sing-box"), mode=0o700)
     assert check.check_device("my phone") == [
-        ("error", "device names are letters, digits, . _ - (not starting with .)")]
+        ("error", "device names are letters, digits, . _ - (not starting with .): my phone")]
 
 
 def test_every_private_file_and_folder(tmp_store):
@@ -152,3 +152,10 @@ def test_another_devices_unreadable_folder(tmp_store):
                      check.quiet)
     finally:
         os.chmod(tmp_store.path("devices/tv/config"), 0o700)
+
+
+def test_a_name_that_isnt_a_device(tmp_store, capsys):
+    tmp_store.device("ph")
+    assert check.main(["", "../ph"]) == 1
+    out = capsys.readouterr().out
+    assert out.count("error: no device") == 2

@@ -27,13 +27,16 @@ def line(changed: bool, what: str) -> str:
 
 def daemon_warp(device_dir: str) -> str:
     """The daemon's WARP: carried inside a warped tunnel, so Table = off (the
-    daemon routes), and always 1280 (tunnel.sh lowers it in a small carrier)."""
+    daemon routes), at the profile's MTU as the sweep and singbox.sh use it
+    (tunnel.sh lowers it in a small carrier)."""
     f = store.Folder(device_dir)
     profile = Conf.read(f.profile)
     why = profile.problem()             # as the sweep would skip it
     if why:
         raise Error(f"{f.profile}: {why}")
-    return f"""# Written by wireguard-tunnels install.sh from ~/wg-tunnels/devices/{f.name}/warp/wgcf-profile.conf.
+    store_at = store.root().replace(os.path.expanduser("~"), "~", 1)
+    mtu = profile.mtu(WARP_MTU)
+    return f"""# Written by wireguard-tunnels install.sh from {store_at}/devices/{f.name}/warp/wgcf-profile.conf.
 #
 # Cloudflare WARP exit, carried inside another WireGuard tunnel (warped.*). `tunnel.sh import`
 # copies it for the wg-tunnels daemon, which does the
@@ -43,8 +46,8 @@ def daemon_warp(device_dir: str) -> str:
 PrivateKey = {profile.value("PrivateKey")}
 Address = {", ".join(profile.items("Address"))}
 DNS = 1.1.1.1
-# IPv6's minimum: fits in a carrier of {WARP_MTU + WARP_OVERHEAD} or more (tunnel.sh lowers it in a smaller one)
-MTU = {WARP_MTU}
+# IPv6's minimum: fits in a carrier of {mtu + WARP_OVERHEAD} or more (tunnel.sh lowers it in a smaller one)
+MTU = {mtu}
 Table = off
 
 [Peer]
@@ -57,8 +60,7 @@ PersistentKeepalive = {KEEPALIVE}
 
 
 def device_name(args: List[str]) -> List[str]:
-    if not store.valid_device(args[0]):
-        raise Error(f"Device names are letters, digits, . _ - (not starting with .): {args[0]}")
+    store.check_device(args[0])
     return []
 
 

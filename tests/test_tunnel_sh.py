@@ -109,3 +109,8 @@ def test_conf_val_drops_a_comment_as_wgtun_does(tmp_path):
 def test_nord_sh_writes_the_same_keepalive():
     with open(os.path.join(store.SCRIPTS, "nord.sh"), encoding="utf-8") as f:
         assert re.findall(r"PersistentKeepalive = (\d+)", f.read()) == [str(store.KEEPALIVE)]
+
+
+def test_nord_sh_writes_the_mark_wgtun_reads():
+    with open(os.path.join(store.SCRIPTS, "nord.sh"), encoding="utf-8") as f:
+        assert f'echo "{store.NORD_MARK} ' in f.read()

@@ -81,4 +81,16 @@ def test_device_name(capsys):
     for bad in (".hidden", "my phone"):
         assert forinstall.main(["device-name", bad]) == 1
         err = capsys.readouterr().err
-        assert err == f"install.sh: Device names are letters, digits, . _ - (not starting with .): {bad}\n"
+        assert err == f"install.sh: device names are letters, digits, . _ - (not starting with .): {bad}\n"
+
+
+def test_daemon_warp_at_the_profiles_mtu(tmp_store, capsys, fake_wgcf, tmp_path):
+    """As the sweep and singbox.sh run WARP: the profile's MTU, not a fixed 1280."""
+    dev = tmp_store.path("devices/mac")
+    run(capsys, "warp-account", dev)
+    profile = tmp_store.read("devices/mac/warp/wgcf-profile.conf").replace("MTU = 1280", "MTU = 1300")
+    tmp_store.put("devices/mac/warp/wgcf-profile.conf", profile)
+    dest = str(tmp_path / "warp.conf")
+    run(capsys, "daemon-warp", dev, dest)
+    with open(dest, encoding="utf-8") as f:
+        assert "MTU = 1300\n" in f.read()

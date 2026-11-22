@@ -68,11 +68,12 @@ class Conf:
                 return f"no {key}"
         if not self.items("Address"):
             return "no Address"
-        if not re.fullmatch(r".+:[0-9]+", self.value("Endpoint")):
+        endpoint = re.fullmatch(r".+:([0-9]+)", self.value("Endpoint"))
+        if not endpoint or not 1 <= int(endpoint.group(1)) <= 65535:
             return "Endpoint isn't host:port"
         mtu = self.value("MTU")
-        if mtu and not is_number(mtu):
-            return "MTU isn't a number"
+        if mtu and not (is_number(mtu) and 576 <= int(mtu) <= 65535):
+            return "MTU isn't a number from 576 to 65535"
         return ""
 
     def rewrite(self, edits: Dict[str, Callable[[str], List[str]]]) -> str:

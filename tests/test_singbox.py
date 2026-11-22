@@ -158,7 +158,7 @@ def test_cmd_build_writes_and_removes(phone, capsys):
     assert set(profile_states(capsys.readouterr().out).values()) == {"unchanged"}
 
 
-def test_warp_without_its_profile_isnt_built(phone, capsys):
+def test_warp_without_its_profile_isnt_built(phone):
     """A config/warp.<device>.conf left after warp/ is gone is an orphan, not WARP."""
     singbox.cmd_build("ph")
     os.remove(phone.path("devices/ph/warp/wgcf-profile.conf"))
@@ -184,7 +184,7 @@ def test_cli(tmp_store, capsys):
         assert "usage: singbox.sh" in capsys.readouterr().err
     assert singbox.main([]) == 1
     assert singbox.main(["build", "bad name"]) == 1
-    assert "device names are letters" in capsys.readouterr().err
+    assert "device names are letters, digits, . _ - (not starting with .): bad name" in capsys.readouterr().err
 
 
 def test_list(phone, capsys):
@@ -221,3 +221,11 @@ def test_a_name_the_composite_has_case_aside(phone):
     phone.put("devices/ph/config/PH.conf", client("upper"))
     with pytest.raises(Error, match="is the composite"):
         build(phone, "ph")
+
+
+def test_new_claims_only_what_it_wrote(tmp_store, fake_wgcf, capsys):
+    tmp_store.device("tv", carriers=True, warp=False)
+    tmp_store.put("devices/tv/warp/wgcf-account.toml", "t")
+    tmp_store.put("devices/tv/warp/wgcf-profile.conf", "[Interface]\nPrivateKey = x\n")      # broken
+    singbox.cmd_new("tv")
+    assert "WireGuard app config" not in capsys.readouterr().out

@@ -23,6 +23,7 @@ WARP_OVERHEAD = 80                   # what a carrier adds to each WARP packet
 WIDEST_V4, WIDEST_V6 = 8, 16          # a carrier's extras: wider would take traffic from WARP
 PLAIN_MTU = 1420                     # wg-quick's default
 WARPED = "warped."                   # the name of a tunnel that carries WARP starts with it
+NORD_MARK = "# source: nord"          # nord.sh's line: a Nord config (it shares the account's key)
 SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
 
 # What a main() reports as one line instead of a traceback: its own reasons
@@ -57,8 +58,19 @@ def device_dir(device: str) -> str:
 
 
 def valid_device(name: str) -> bool:
-    """A name a device folder can have (tunnel.sh and install.sh check the same)."""
+    """A name a device folder can have (tunnel.sh keeps a copy, pinned by its tests)."""
     return re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", name) is not None
+
+
+def check_device(name: str) -> None:
+    """valid_device, or the Error that says why not."""
+    if not valid_device(name):
+        raise Error(f"device names are letters, digits, . _ - (not starting with .): {name}")
+
+
+def mode(path: str) -> int:
+    """A file's or folder's permission bits (0o600, say)."""
+    return stat.S_IMODE(os.stat(path).st_mode)
 
 
 class Folder:
@@ -110,7 +122,7 @@ def files_in(folder: str, ext: str = ".conf") -> List[str]:
     if not os.path.isdir(folder):
         return []
     return collated([os.path.join(folder, f) for f in os.listdir(folder)
-                    if f.endswith(ext) and not f.startswith(".")])
+                    if f.endswith(ext) and not f.startswith(".") and os.path.isfile(os.path.join(folder, f))])
 
 
 def all_devices() -> List[str]:
@@ -214,7 +226,7 @@ def update_private(path: str, text: str) -> str:
 
 def private_dir(path: str) -> bool:
     """Make path a 0700 folder; whether that changed anything."""
-    if os.path.isdir(path) and stat.S_IMODE(os.stat(path).st_mode) == 0o700:
+    if os.path.isdir(path) and mode(path) == 0o700:
         return False
     os.makedirs(path, exist_ok=True)
     os.chmod(path, 0o700)
@@ -247,7 +259,7 @@ def warp_account(f: Folder) -> Tuple[bool, bool, List[str]]:
     if generated:
         wgcf(f.warp, "generate")
     # The account (its API token) and the profile (its private key): owner only, whatever wgcf wrote them as
-    tightened = [p for p in (f.account, f.profile) if stat.S_IMODE(os.stat(p).st_mode) != 0o600]
+    tightened = [p for p in (f.account, f.profile) if mode(p) != 0o600]
     for p in tightened:
         os.chmod(p, 0o600)
     return registered, generated, tightened
@@ -258,13 +270,13 @@ def warp_account(f: Folder) -> Tuple[bool, bool, List[str]]:
 def key_clashes(device: str, used: List[Conf]) -> Tuple[str, str]:
     """(an error, a note), each "" for none. No private key on two devices
     (two devices on one key knock each other off), wherever they run it: the
-    error names the files, never the key. Not Nord's ("# source: nord"): Nord
+    error names the files, never the key. Not Nord's (NORD_MARK): Nord
     gives one key per account, so nord.sh keeps each on its own server
     instead. A key used twice on one device only gets a note: a device runs
     one tunnel (one profile) at a time, and sing-box groups have no keepalives."""
     def keyed(confs: Iterable[Conf]) -> List[Tuple[str, str]]:
-        return [(c.value("PrivateKey"), os.path.relpath(c.path, devices_dir())) for c in confs
-                if c.value("PrivateKey") and not any(ln.startswith("# source: nord") for ln in c.lines)]
+        return [(key, os.path.relpath(c.path, devices_dir())) for c in confs
+                for key in [c.value("PrivateKey")] if key and not any(ln.startswith(NORD_MARK) for ln in c.lines)]
 
     mine: Dict[str, str] = {}
     same_device = []

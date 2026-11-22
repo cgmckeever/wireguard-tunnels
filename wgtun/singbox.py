@@ -91,8 +91,9 @@ def endpoint(c: Conf, tag: str, mtu: int, detour: str = "") -> dict:
                   "allowed_ips": c.items("AllowedIPs")}
     if c.value("PresharedKey"):
         peer["pre_shared_key"] = c.value("PresharedKey")
-    if c.keepalive():
-        peer[KEEPALIVE_KEY] = c.keepalive()
+    keepalive = c.keepalive()
+    if keepalive:
+        peer[KEEPALIVE_KEY] = keepalive
     ep["peers"] = [peer]
     return ep
 
@@ -152,13 +153,12 @@ def group_key(tag: str) -> str:
 # --- the tunnels of a device ---
 
 class Device(store.Folder):
-    """A device build and new can take: its name is one sing-box can use."""
+    """A device build and new can take (store.valid_device names only)."""
 
     def __init__(self, name: str, verb: str) -> None:
         if not name:
             raise Error(f"a device name, please (singbox.sh {verb} <device>)")
-        if not store.valid_device(name):
-            raise Error("device names are letters, digits, . _ - (not starting with .)")
+        store.check_device(name)
         super().__init__(store.device_dir(name))
         self.setup = "install.sh" if name == store.this_mac() else f"{HERE} new {name}"
 
@@ -248,7 +248,7 @@ def check_tags(dev: Device, made: List[Unit]) -> None:
 def plan(dev: Device, swept: sweep.Sweep, say: Say) -> Dict[str, str]:
     """Every profile build writes, by file name; changes nothing."""
     made = units(dev, swept, say)
-    if not [u for u in made if u.tag != store.warp_alone(dev.name)]:
+    if not any(u.tag != store.warp_alone(dev.name) for u in made):
         raise Error(f"nothing to build: put configs in {dev.carriers} or {dev.config}")
     error, note = store.key_clashes(dev.name, [u.conf for u in made])
     if error:
@@ -343,8 +343,11 @@ def cmd_new(name: str) -> None:
     registered, _, _ = store.warp_account(dev)
     print(f"WARP account: {'registered' if registered else 'already there'}")
     # config/warp.<device>.conf (WARP alone, for the WireGuard app) now, for a device that never runs build
-    sweep_for(dev).write()
-    print(f"WireGuard app config: {dev.config}/{store.warp_alone(name)}.conf (WARP alone)\n")
+    swept = sweep_for(dev)
+    swept.write()
+    if any(r.name == store.warp_alone(name) for r in swept.written()):
+        print(f"WireGuard app config: {dev.config}/{store.warp_alone(name)}.conf (WARP alone)")
+    print()
     print(f"Next: put this device's carriers in {dev.carriers}/ and its plain tunnels\n"
           f"      in {dev.config}/ (new WireGuard configs made for this device)\n"
           f"then: {HERE} build {name}")
