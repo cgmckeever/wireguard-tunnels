@@ -866,6 +866,9 @@ cmd_daemon() {
     need_root daemon
     DAEMON=1 NET_GW=$(gateway)
     mkdir -p "$RUN" "$STATE" && chmod 755 "$RUN" "$STATE"
+    # A request id from the start (a reboot empties $RUN): the boot apply, and
+    # the watchdog's retries, can be cut short by a newer request like any other
+    [ -s "$RUN/request" ] || put "$RUN/request" boot
     # The kill switch survives a restart (its routes do) but not a reboot:
     # trust the routes, not the file, or a down after a restart mid-apply
     # would leave traffic blocked. Off: take off the WARP guard recorded too.
@@ -1200,7 +1203,8 @@ follow() {
     local req="$1" seen=1 n line i=0
     printf 'Waiting for the daemon '
     until [ "$(head -1 "$RUN/progress" 2>/dev/null)" = "req $req" ]; do
-        [ "$i" -ge 15 ] && { echo " no answer — is it running? (tunnel.sh log)" >&2; return 1; }
+        # 30s: a watchdog MTU check on a network that drops pings takes about 18
+        [ "$i" -ge 30 ] && { echo " no answer — is it running? (tunnel.sh log)" >&2; return 1; }
         printf '.'; sleep 1; i=$((i + 1))
     done
     echo
@@ -1451,7 +1455,7 @@ cmd_extract() {
     mkdir -p "$configs" && chmod 700 "$configs"
     tmp=$(mktemp -d "$configs/../.extract.XXXXXX") || die "mktemp failed"
     chmod 700 "$tmp"
-    unzip -qj "$zip" '*.conf' -d "$tmp" 2>/dev/null; rc=$?
+    unzip -oqj "$zip" '*.conf' -d "$tmp" 2>/dev/null; rc=$?   # -o: never ask
     # 11: nothing matched (said just below)
     [ "$rc" -eq 0 ] || [ "$rc" -eq 11 ] || { rm -rf "$tmp"; die "Can't unzip ${zip}"; }
     for f in "$tmp"/*.conf; do [ -f "$f" ] && n=$((n + 1)); done
