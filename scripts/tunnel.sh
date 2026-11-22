@@ -1483,14 +1483,15 @@ cmd_import() {
 usage() { echo "Usage: tunnel.sh up [n|name] | down | pause [min] | resume | status | list | extract [zip] | import [dir] [-y] | extract-import [zip] | default [device] | update | install | uninstall | rotate-warp | diag [file] | log | breakglass"; }
 list_all() { echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other; }
 
-case "${1:-status}" in
+case "${1:-}" in
+    "")        check_installed; status; echo; usage ;;   # no command: status, and what else there is
     -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0" ;;
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
     pause)     cmd_pause "$2" ;;
     resume)    cmd_resume ;;
     diag)      cmd_diag "$2" ;;
-    status)    check_installed; status; echo; usage ;;
+    status)    check_installed; status ;;
     list)      list_all ;;
     extract)   cmd_extract "$2" ;;
     import)    shift; cmd_import "$@" ;;
