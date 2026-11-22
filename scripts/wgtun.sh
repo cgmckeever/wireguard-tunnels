@@ -8,18 +8,13 @@
 #   wgtun.sh <script> -h           that script's own usage
 #   wgtun.sh -h                    this list
 #
-# <script> is tunnel, singbox, nord, qr or check (".sh" optional). Each runs exactly
+# <script> is tunnel, singbox, nord, qr, wgwarp-sweep or check (".sh" optional). Each runs exactly
 # as it would by its own path.
 
 set -euo pipefail
 
-# Find the real folder even when this is run through a symlink.
-src="$0"
-while [ -L "$src" ]; do
-    link=$(readlink "$src")
-    case "$link" in /*) src="$link" ;; *) src="$(dirname "$src")/$link" ;; esac
-done
-here=$(cd "$(dirname "$src")" && pwd)
+# The real folder, even when this is run through a link
+here=$(dirname "$(readlink -f "$0")")
 
 # name|summary
 TOOLS=(
@@ -27,6 +22,7 @@ TOOLS=(
     "singbox|Devices on sing-box (iPhone, Apple TV...): new, build, list"
     "nord|A NordVPN config for a device (carrier or config) or a server (an exit)"
     "qr|A device's tunnel as a QR code, to scan into the WireGuard app"
+    "wgwarp-sweep|Sweep a device's carriers into warped tunnels (import and build run it for you)"
     "check|Is the store as the scripts leave it? configs, keys, keepalives, profiles"
 )
 
@@ -35,20 +31,17 @@ list() {
     echo "wgtun.sh <script> [args]   (wgtun.sh <script> -h for its commands)"
     echo
     for t in "${TOOLS[@]}"; do
-        printf '  %d) %-8s %s\n' "$i" "${t%%|*}" "${t#*|}"
+        printf '  %d) %-12s %s\n' "$i" "${t%%|*}" "${t#*|}"
         i=$((i + 1))
     done
 }
-
-# usage_of <script path>: its header comment, the same text its -h shows
-usage_of() { sed -n '2,/^$/s/^# \{0,1\}//p' "$1"; }
 
 run() {
     local name="${1%.sh}" t
     shift
     for t in "${TOOLS[@]}"; do
         if [ "${t%%|*}" = "$name" ]; then
-            case "${1:-}" in -h|--help|help) usage_of "$here/$name.sh"; exit 0 ;; esac
+            [ "${1:-}" = help ] && set -- --help      # every script takes -h/--help
             exec "$here/$name.sh" "$@"
         fi
     done

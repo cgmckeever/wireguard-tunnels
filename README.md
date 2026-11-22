@@ -144,10 +144,11 @@ alias tunnel=~/Documents/code/wireguard-tunnels/scripts/tunnel.sh
 alias singbox=~/Documents/code/wireguard-tunnels/scripts/singbox.sh
 alias nord=~/Documents/code/wireguard-tunnels/scripts/nord.sh
 alias qr=~/Documents/code/wireguard-tunnels/scripts/qr.sh
+alias check=~/Documents/code/wireguard-tunnels/scripts/check.sh
 ```
 
 From here on this README writes just the script name (`tunnel.sh`,
-`singbox.sh`, `nord.sh`, `qr.sh`).
+`singbox.sh`, `nord.sh`, `qr.sh`, `wgwarp-sweep.sh`, `check.sh`).
 
 ### install.sh
 
@@ -423,7 +424,7 @@ The kill switch blocks all traffic outside the tunnel until you run
 `~/wg-tunnels/devices/<mac>/carriers/` first, then installs everything in
 `config/`, so a new or changed carrier needs only an `import`. The sweep's
 report also says, per tunnel, what to do about the WireGuard app's copy, if
-you keep one there. `scripts/wgwarp-sweep.sh` runs the sweep alone: it
+you keep one there. `wgwarp-sweep.sh [<device>]` runs the sweep alone: it
 updates `config/` and prints the report, but installs nothing.
 
 `import` installs a `warped.*` file only if it still looks swept: the WARP
@@ -725,8 +726,7 @@ and reports, a config it can't use: it needs `[Interface]`, one `[Peer]`, a
 numeric `MTU` if one is set.
 
 **Warped tunnels.** `build` runs the [sweep](#warped-tunnels) on the device's
-`carriers/` first (`scripts/wgwarp-sweep.sh <device>` runs it alone: it
-updates `config/` and prints the report). It skips a `warped.*` file whose carrier is missing from
+`carriers/` first. It skips a `warped.*` file whose carrier is missing from
 `carriers/` or broken, so orphans drop out of the profiles. A device with no
 `warp/` (only configs from wireguard-tools, say) gets its plain tunnels only.
 
@@ -889,7 +889,7 @@ never listed, imported or built. Delete them when you no longer need them.
 
 ## Checking the store
 
-`scripts/check.sh` (or `wgtun.sh check`) reads every device, or the ones you
+`check.sh` (or `wgtun.sh check`) reads every device, or the ones you
 name, and changes nothing:
 
 - every config in `carriers/` and `config/`, and `warp/wgcf-profile.conf`, is
@@ -914,6 +914,9 @@ whichever `python3` is first on your `PATH`). The three are links to
 `scripts/_python.sh`, which runs the module for the name it was called by.
 `tunnel.sh`, `nord.sh`, `qr.sh` and `install.sh` stay shell: `tunnel.sh` is
 the root daemon, installed as one file, so it can't load code from the repo.
+`nord.sh` and `qr.sh` share `scripts/_lib.sh` (the device picker, the store's
+paths, `die`, help); install.sh asks `wgtun/forinstall.py` for the store's steps
+(folders, the WARP account, the daemon's `warp.conf`), so they're done once.
 
 | File | What |
 |------|------|
@@ -922,13 +925,14 @@ the root daemon, installed as one file, so it can't load code from the repo.
 | `wgtun/sweep.py` | `wgwarp-sweep.sh` |
 | `wgtun/singbox.py` | `singbox.sh` |
 | `wgtun/check.py` | `check.sh` |
-| `wgtun/forinstall.py` | What `install.sh` asks of it: the WARP endpoint, the daemon's `warp.conf` |
+| `wgtun/forinstall.py` | What `install.sh` asks of it: the WARP endpoint, 0700 folders, the WARP account, the daemon's `warp.conf` |
 
 The sweep and `build` each have a `plan()` that changes nothing; `check.sh`
 compares their plans with the disk.
 
 `./test.sh` runs the tests (each builds its own store in a temp folder, with
-fake keys); `./test.sh lint` runs ruff and mypy; `./test.sh all` both. The
+fake keys); `./test.sh lint` runs ruff and mypy, and `bash -n` (plus
+shellcheck, if it's installed) on every shell script; `./test.sh all` both. The
 first run makes `.venv/` with pytest, ruff and mypy, on macOS's Python 3.9
 when it's there (the oldest the scripts must run on).
 

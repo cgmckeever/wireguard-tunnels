@@ -13,8 +13,8 @@
 #   option, or no terminal, skips the questions.
 #
 #   (default)     Local Mac Tunnels, and what Sing-Box Device Tunnels need too.
-#                 Homebrew packages wireguard-tools, wgcf, jq and qrencode; this Mac's device
-#                 folder ~/wg-tunnels/devices/<name> (asked the first time, then
+#                 Homebrew packages wireguard-tools, wgcf, jq and qrencode;
+#                 this Mac's device folder ~/wg-tunnels/devices/<name> (asked the first time, then
 #                 kept in ~/wg-tunnels/devices/.default);
 #                 a Cloudflare WARP account and $(brew --prefix)/etc/wireguard/warp.conf;
 #                 the daemon (/usr/local/sbin/wg-tunnels + LaunchDaemon, sudo)
@@ -28,9 +28,9 @@
 #   --no-daemon   Skip the daemon step (e.g. Ansible runs it separately with
 #                 become: scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>)
 #   --sing-box [--device <name>]
-#                 Only what building sing-box profiles needs (singbox.sh): wgcf
-#                 (and jq for nord.sh, qrencode for qr.sh), ~/wg-tunnels/devices and a first device (asked, or
-#                 --device; singbox.sh new makes more). No Local Mac Tunnels: no
+#                 Only what Sing-Box Device Tunnels need: wgcf, jq (nord.sh),
+#                 qrencode (qr.sh), ~/wg-tunnels/devices and a first device
+#                 (asked, or --device; singbox.sh new makes more). No Local Mac Tunnels: no
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
 #                 without --sing-box to add Local Mac Tunnels later
 #
@@ -41,8 +41,7 @@ set -u
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
 WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
-TUNNELS_DIR="$WG_TUNNELS"
-DEVICES="$TUNNELS_DIR/devices"         # one folder per device
+DEVICES="$WG_TUNNELS/devices"          # one folder per device
 DEFAULT_FILE="$DEVICES/.default"       # this Mac's device (tunnel.sh default)
 INSTALLED="/usr/local/sbin/wg-tunnels"
 PLIST="/Library/LaunchDaemons/com.local.wg-tunnels.plist"
@@ -67,6 +66,8 @@ done
 die() { echo "$*" >&2; exit 1; }
 ok() { printf '  ok       %s\n' "$*"; }
 changed() { printf '  changed  %s\n' "$*"; }
+# The store's own steps, done by the code the sweep and singbox.sh use (wgtun/forinstall.py)
+forinstall() { PYTHONPATH="$REPO" python3 -m wgtun.forinstall "$@"; }
 
 [ "$(uname -s)" = Darwin ] || die "macOS only"
 # Which install, when nothing says: only asked before Local Mac Tunnels are
@@ -116,14 +117,7 @@ done
 echo "== ~/wg-tunnels"
 
 if [ "$singbox_only" = 1 ]; then
-    for d in "$TUNNELS_DIR" "$DEVICES"; do
-        if [ -d "$d" ] && [ "$(stat -f %Lp "$d")" = 700 ]; then
-            ok "$d"
-        else
-            mkdir -p "$d" && chmod 700 "$d" || die "Can't create $d"
-            changed "$d"
-        fi
-    done
+    forinstall folders "$WG_TUNNELS" "$DEVICES" || exit 1
     if [ -z "$device" ] && [ -t 0 ]; then
         read -rp "  First sing-box device name (e.g. iphone; Enter to skip): " device
     fi
@@ -163,7 +157,6 @@ WARP_DIR="$DEV_DIR/warp"
 # (one line, IPv4:port), else Cloudflare's default. Read by the same code as
 # the sweep's (wgtun/), so this Mac's WARP and its config/ agree. Checked now,
 # before anything changes; used for warp.conf below.
-forinstall() { PYTHONPATH="$REPO" python3 -m wgtun.forinstall "$@"; }
 forinstall warp-endpoint "$DEV_DIR" > /dev/null || exit 1
 
 umask 077    # until warp.conf is written: everything here holds private keys
@@ -175,14 +168,8 @@ umask 077    # until warp.conf is written: everything here holds private keys
 #       exports/     WireGuard app "Export Tunnels to Zip" (every private key, plain text)
 #       warp/        the wgcf WARP account and profile
 #       sing-box/    profiles from singbox.sh build, if you use sing-box here
-for d in "$TUNNELS_DIR" "$DEVICES" "$DEV_DIR" "$DEV_DIR/carriers" "$DEV_DIR/config" "$DEV_DIR/exports" "$WARP_DIR"; do
-    if [ -d "$d" ] && [ "$(stat -f %Lp "$d")" = 700 ]; then
-        ok "$d"
-    else
-        mkdir -p "$d" && chmod 700 "$d" || die "Can't create $d"
-        changed "$d"
-    fi
-done
+forinstall folders "$WG_TUNNELS" "$DEVICES" "$DEV_DIR" "$DEV_DIR/carriers" "$DEV_DIR/config" \
+    "$DEV_DIR/exports" "$WARP_DIR" || exit 1
 if [ "$(cat "$DEFAULT_FILE" 2>/dev/null)" = "$device" ]; then
     ok "default device $device"
 else
@@ -192,43 +179,9 @@ fi
 
 echo "== Cloudflare WARP"
 # This Mac's free WARP account, created once in its device's warp/ (every
-# other device has its own: singbox.sh new)
-if [ -f "$WARP_DIR/wgcf-account.toml" ]; then
-    ok "account"
-else
-    (cd "$WARP_DIR" && wgcf register --accept-tos) || die "wgcf register failed"
-    rm -f "$WARP_DIR/wgcf-profile.conf"     # one left from an earlier account
-    changed "account registered"
-fi
-if [ -f "$WARP_DIR/wgcf-profile.conf" ]; then
-    ok "profile"
-else
-    (cd "$WARP_DIR" && wgcf generate) || die "wgcf generate failed"
-    changed "profile generated"
-fi
-# The account (its API token) and the profile (its private key): owner only,
-# whatever wgcf wrote them as
-for f in "$WARP_DIR/wgcf-account.toml" "$WARP_DIR/wgcf-profile.conf"; do
-    if [ "$(stat -f %Lp "$f")" != 600 ]; then
-        chmod 600 "$f"
-        changed "$f 0600"
-    fi
-done
-
-# warp.conf for wg-quick, from the wgcf profile (wgtun/forinstall.py writes it)
-warp_conf="$BREW_PREFIX/etc/wireguard/warp.conf"
-mkdir -p "$BREW_PREFIX/etc/wireguard" && chmod 700 "$BREW_PREFIX/etc/wireguard"
-umask 077
-tmp=$(mktemp "$BREW_PREFIX/etc/wireguard/.warp.XXXXXX") || die "mktemp failed"
-forinstall daemon-warp "$DEV_DIR" > "$tmp" || { rm -f "$tmp"; exit 1; }
-chmod 600 "$tmp"
-if [ -f "$warp_conf" ] && cmp -s "$tmp" "$warp_conf"; then
-    rm -f "$tmp"
-    ok "$warp_conf"
-else
-    mv -f "$tmp" "$warp_conf"
-    changed "$warp_conf (tunnel.sh import to pass it to the daemon)"
-fi
+# other device has its own: singbox.sh new), then warp.conf for wg-quick from it
+forinstall warp-account "$DEV_DIR" || exit 1
+forinstall daemon-warp "$DEV_DIR" "$BREW_PREFIX/etc/wireguard/warp.conf" || exit 1
 umask 022
 
 if [ "$daemon" = 1 ]; then
@@ -277,7 +230,7 @@ if [ "$swiftbar" = 1 ]; then
     # (quitting it from its menu leaves it quit until the next login). Any
     # LaunchAgent that already runs SwiftBar is left to do that job: a second
     # one would start a second copy.
-    other=$(grep -l "$SWIFTBAR_APP" "$HOME"/Library/LaunchAgents/*.plist 2>/dev/null | grep -vx "$SWIFTBAR_AGENT" | head -1)
+    other=$(grep -l "$SWIFTBAR_APP" "$HOME"/Library/LaunchAgents/*.plist 2>/dev/null | grep -vxF "$SWIFTBAR_AGENT" | head -1)
     if [ -n "$other" ]; then
         ok "SwiftBar kept running by $other"
     else

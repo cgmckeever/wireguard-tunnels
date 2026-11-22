@@ -15,12 +15,7 @@
 # Installed as a symlink into SwiftBar's plugin folder (install.sh --swiftbar);
 # the scripts are wherever the link points (scripts/swiftbar/..).
 
-src="${SWIFTBAR_PLUGIN_PATH:-$0}"
-while [ -L "$src" ]; do
-    l=$(readlink "$src")
-    case "$l" in /*) src="$l" ;; *) src="$(dirname "$src")/$l" ;; esac
-done
-SCRIPTS="$(cd "$(dirname "$src")/.." && pwd)"
+SCRIPTS="$(cd "$(dirname "$(readlink -f "${SWIFTBAR_PLUGIN_PATH:-$0}")")/.." && pwd)"
 TUNNEL="$SCRIPTS/tunnel.sh"
 STATUS=/var/run/wg-tunnels/status
 SELF="${SWIFTBAR_PLUGIN_PATH:-$0}"
@@ -29,6 +24,17 @@ for TSV in /opt/homebrew/etc/wg-tunnels/tunnels.tsv /usr/local/etc/wg-tunnels/tu
 done
 
 st() { awk -v k="$1" '$1 == k {$1 = ""; sub(/^ /, ""); print; exit}' "$STATUS" 2>/dev/null; }
+# kv <text> <key>: the value of a key=value line (Cloudflare's trace)
+kv() { awk -F= -v k="$2" '$1 == k {print $2; exit}' <<< "$1"; }
+# app_tunnels: WireGuard app tunnels that are connected, comma-separated
+app_tunnels() {
+    scutil --nc list | sed -nE \
+        's/.*\((Connected)\)[[:space:]]+[0-9A-F-]{36} VPN \(com\.wireguard\.macos\) "([^"]+)".*/\2/p' | paste -sd, -
+}
+# A stale status file means the daemon isn't running: trust nothing in it
+fresh=""
+upd=$(st updated)
+[ -n "$upd" ] && [ $(( $(date +%s) - upd )) -le 15 ] && fresh=1
 
 # Uptime: the daemon writes current once, when a tunnel is up (a reconnect or
 # a watchdog restart starts the clock again)
@@ -52,13 +58,12 @@ if [ "$1" = run ]; then
     export SUDO_ASKPASS="$SCRIPTS/askpass.sh"
     # reconnect <name>: the same tunnel again; the daemon takes it down and up
     if [ "$1" = reconnect ]; then
-        what="Reconnect $2"
         out=$("$TUNNEL" up "$2" < /dev/null 2>&1); rc=$?
     else
         out=$("$TUNNEL" "$@" < /dev/null 2>&1); rc=$?
     fi
     case "$1" in
-        reconnect) ;;
+        reconnect) what="Reconnect $2" ;;
         pause) what="Pause for $2 min" ;;
         resume) what="Resume" ;;
         diag) what="Diagnostics" ;;
@@ -88,14 +93,17 @@ fi
 # Menu "Status": an alert with what matters, no Terminal
 if [ "$1" = popup ]; then
     trace=$(curl -s --max-time 6 https://www.cloudflare.com/cdn-cgi/trace)
-    tv() { awk -F= -v k="$1" '$1 == k {print $2}' <<< "$trace"; }
-    name=$(st name)
-    read -r pstate pname puntil <<< "$(st state)"
-    apps=$(scutil --nc list | sed -nE \
-        's/.*\((Connected)\)[[:space:]]+[0-9A-F-]{36} VPN \(com\.wireguard\.macos\) "([^"]+)".*/\2/p' | paste -sd, -)
+    name="" pstate="" pname="" puntil=""
+    if [ -n "$fresh" ]; then
+        name=$(st name)
+        read -r pstate pname puntil <<< "$(st state)"
+    fi
+    apps=$(app_tunnels)
     icons=/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources
     icon="$icons/LockedIcon.icns"
-    if [ "$pstate" = paused ]; then title="Paused: ${pname}, back at $(date -r "${puntil:-0}" +%H:%M)"; icon="$icons/UnlockedIcon.icns"
+    if [ -z "$fresh" ] && [ -f "$STATUS" ]; then
+        title="The daemon isn't answering (tunnel.sh status, or tunnel.sh log)"; icon="$icons/AlertStopIcon.icns"
+    elif [ "$pstate" = paused ]; then title="Paused: ${pname}, back at $(date -r "${puntil:-0}" +%H:%M)"; icon="$icons/UnlockedIcon.icns"
     elif [ "$pstate" = connecting ]; then title="Connecting: ${pname}"
     elif [ "$pstate" = reconnecting ]; then title="Reconnecting: ${name} (its exit went silent)"
     elif [ -n "$name" ]; then title="VPN on: ${name}"
@@ -105,7 +113,8 @@ if [ "$1" = popup ]; then
     else title="No VPN"; icon="$icons/UnlockedIcon.icns"; fi
     msg=""
     if [ -n "$trace" ]; then
-        msg+="Exit: $(tv ip)"$'\n'"Location: $(tv loc) ($(tv colo))   WARP: $(tv warp)"$'\n'
+        msg+="Exit: $(kv "$trace" ip)"$'\n'"Location: $(kv "$trace" loc) ($(kv "$trace" colo))"
+        msg+="   WARP: $(kv "$trace" warp)"$'\n'
     else
         msg+="Exit: no answer (blocked or offline)"$'\n'
     fi
@@ -127,11 +136,6 @@ OSA
     exit 0
 fi
 
-# A stale status file means the daemon isn't running: trust nothing in it
-fresh=""
-upd=$(st updated)
-[ -n "$upd" ] && [ $(( $(date +%s) - upd )) -le 15 ] && fresh=1
-
 name="" kind="" want="" armed="" hs="" warp_hs="" state="" sname="" suntil=""
 if [ -n "$fresh" ]; then
     name=$(st name)
@@ -141,13 +145,6 @@ if [ -n "$fresh" ]; then
     hs=$(st iface | awk '{print $3}')
     warp_hs=$(st warp | awk '{print $3}')
     read -r state sname suntil <<< "$(st state)"
-    # A daemon from before the state line: work it out as this plugin used to
-    if [ -z "$state" ]; then
-        sname=$(st desired | cut -d' ' -f2)
-        if [ -n "$name" ]; then state=up; sname="$name"
-        elif [ "$want" = up ]; then state=blocked
-        else state=down; fi
-    fi
 fi
 # The exit interface: WARP when warped, else the tunnel
 exit_u=""
@@ -186,11 +183,10 @@ lookup() {  # lookup <file> <key>: refresh <file> if its key differs or it's 10 
         v() { sed -nE "s/.*\"$1\": *\"([^\"]*)\".*/\1/p" <<< "$j" | head -1; }
         # Cloudflare's view: warp=on|off, and the data center (colo)
         t=$(curl -s -m10 https://www.cloudflare.com/cdn-cgi/trace)
-        tv() { awk -F= -v k="$1" '$1 == k {print $2; exit}' <<< "$t"; }
         ip=$(v ip)
         if [ -n "$ip" ]; then
             place=$(printf '%s, %s, %s' "$(v city)" "$(v region)" "$(v country)" | sed 's/^, //; s/, , /, /')
-            w=$(tv warp); c=$(tv colo)
+            w=$(kv "$t" warp); c=$(kv "$t" colo)
             echo "$key $(date +%s) ok ${w:--} ${c:--} $ip $place" > "$f"
         else
             echo "$key $(date +%s) none" > "$f"
@@ -216,8 +212,7 @@ net=$(arp -n "$gw" 2>/dev/null | awk '{print $4; exit}')
 net="${net:-${gw:-none}}"
 
 # WireGuard app tunnels that are connected (checked before the real IP lookup)
-apps=$(scutil --nc list | sed -nE \
-    's/.*\((Connected)\)[[:space:]]+[0-9A-F-]{36} VPN \(com\.wireguard\.macos\) "([^"]+)".*/\2/p' | paste -sd, -)
+apps=$(app_tunnels)
 exit_ip="" real_ip="" exit_key=""
 if [ -n "$name" ]; then
     # A new key on every (re)connect: what's shown was checked since

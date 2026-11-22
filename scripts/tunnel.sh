@@ -1476,6 +1476,7 @@ usage() { echo "Usage: tunnel.sh up [n|name] | down | pause [min] | resume | sta
 list_all() { echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other; }
 
 case "${1:-status}" in
+    -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0" ;;
     up)        cmd_up "$2" ;;
     down)      cmd_down ;;
     pause)     cmd_pause "$2" ;;

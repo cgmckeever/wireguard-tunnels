@@ -41,9 +41,8 @@
 
 set -o pipefail
 umask 077
-die() { echo "nord.sh: $*" >&2; exit 1; }
+SELF=$(readlink -f "$0"); . "$(dirname "$SELF")/_lib.sh"
 
-WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
 TOKEN_FILE="$WG_TUNNELS/.nord-token"
 API=https://api.nordvpn.com/v1
 PORT=51820
@@ -51,39 +50,10 @@ ADDRESS=10.5.0.2/32                         # NordLynx gives every client this
 DNS="103.86.96.100, 103.86.99.100"          # Nord's resolvers
 POOL=50                                     # recommended servers to choose from
 
-case "$1" in -h|--help) sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;; esac
+case "$1" in -h|--help) usage; exit 0 ;; esac
+[ $# -le 5 ] || die "usage: nord.sh device <device> carrier|config <country> [<city>], or nord.sh server <server> <country> [<city>]"
 command -v jq >/dev/null || die "jq missing (brew install jq)"
 command -v curl >/dev/null || die "curl missing"
-
-# pick <what> <choice> <names...>: the name chosen by number or name; asks
-# (a numbered list) when there's no choice yet. Enter takes a lone option, or
-# option $PICK_DEFAULT (a number) when set.
-pick() {
-    local what="$1" choice="$2" i n def="${PICK_DEFAULT:-}" prompt
-    shift 2
-    [ $# -gt 0 ] || die "no ${what}s"
-    if [ -z "$choice" ]; then
-        [ -t 0 ] || die "which ${what}? (no terminal to ask in; see nord.sh --help)"
-        i=1
-        for n in "$@"; do printf '  %d) %s\n' "$i" "$n" >&2; i=$((i + 1)); done
-        [ $# -eq 1 ] && def=1
-        prompt="Pick a $what [1-$#]"; [ -n "$def" ] && prompt+=" (Enter = ${!def})"
-        read -rp "${prompt}: " choice
-        choice="${choice:-$def}"
-        [ -n "$choice" ] || die "nothing picked"
-    fi
-    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le $# ]; then
-        echo "${!choice}"; return
-    fi
-    for i; do [ "$i" = "$choice" ] && { echo "$i"; return; }; done
-    die "no ${what} '${choice}'"
-}
-
-# folders <dir>: its subfolders' names, one per line
-folders() {
-    local d
-    for d in "$1"/*/; do [ -d "$d" ] && basename "$d"; done
-}
 
 # api <path> [curl args]: Nord's JSON
 api() {
@@ -104,7 +74,7 @@ shopt -s nullglob
 
 # 1. The holder: a device or a server
 kind=$(pick "device or server" "$1" device server) || exit 1
-if [ "$kind" = server ]; then base="$WG_TUNNELS/servers"; else base="$WG_TUNNELS/devices"; fi
+if [ "$kind" = server ]; then base="$WG_TUNNELS/servers"; else base="$DEVICES"; fi
 names=()
 while read -r n; do names+=("$n"); done < <(folders "$base")
 [ ${#names[@]} -gt 0 ] || die "no ${kind}s in $base"
@@ -130,18 +100,17 @@ if [ -z "$country_arg" ]; then
     read -rp "Country (a code or a name, e.g. us, Canada): " country_arg
     [ -n "$country_arg" ] || die "no country"
 fi
-country=$(api servers/countries | jq -c --arg q "$country_arg" '
+countries=$(api servers/countries) || exit 1
+country=$(jq -c --arg q "$country_arg" '
     ($q | ascii_downcase) as $q
-    | [.[] | select((.code | ascii_downcase) == $q or (.name | ascii_downcase) == $q)][0] // empty')
+    | [.[] | select((.code | ascii_downcase) == $q or (.name | ascii_downcase) == $q)][0] // empty' <<< "$countries")
 if [ -z "$country" ]; then
-    near=$(api servers/countries | jq -r --arg q "$country_arg" '
+    near=$(jq -r --arg q "$country_arg" '
         ($q | ascii_downcase) as $q
-        | [.[] | select(.name | ascii_downcase | contains($q)) | "\(.code | ascii_downcase) (\(.name))"] | join(", ")')
+        | [.[] | select(.name | ascii_downcase | contains($q)) | "\(.code | ascii_downcase) (\(.name))"] | join(", ")' <<< "$countries")
     die "no Nord country '${country_arg}'${near:+; did you mean: $near}"
 fi
-cid=$(jq -r .id <<< "$country")
-cc=$(jq -r '.code | ascii_downcase' <<< "$country")
-cname=$(jq -r .name <<< "$country")
+IFS=$'\t' read -r cid cc cname < <(jq -r '[.id, (.code | ascii_downcase), .name] | @tsv' <<< "$country")
 
 # 4. The city: any (Nord's pick in the whole country), or one of Nord's
 cities=()
@@ -230,9 +199,11 @@ if [ "$kind" = server ]; then
     case "$codes" in *" $code "*) die "jump code $code is already used by another file in $dir" ;; esac
 fi
 
-# 8. The key: one per Nord account, the same in every Nord config
-key=$(api users/services/credentials -u "token:$(tr -d ' \t\r\n' < "$TOKEN_FILE")" | jq -r '.nordlynx_private_key // empty') \
-    || die "no NordLynx key (is the token in $TOKEN_FILE still valid?)"
+# 8. The key: one per Nord account, the same in every Nord config. The token
+# goes to curl as a config file (a pipe), never as an argument: any user on
+# the Mac can read another's arguments in ps.
+key=$(api users/services/credentials --config <(printf 'user = "token:%s"\n' "$(tr -d ' \t\r\n"' < "$TOKEN_FILE")") \
+    | jq -r '.nordlynx_private_key // empty') || exit 1
 [ -n "$key" ] || die "no NordLynx key (is the token in $TOKEN_FILE still valid?)"
 
 # 9. Write it (only if it changed)
@@ -266,7 +237,7 @@ note=""
 echo "$out: $state, $host, $place$note"
 
 echo
-here=$(cd "$(dirname "$0")" && pwd)
+here="$HERE"
 case "$kind/$role" in
     server/*)       echo "Next: wgt-ctl $holder jump-add   (adds it to $holder as jump $code)" ;;
     device/carrier) echo "Next: $here/tunnel.sh import (this Mac; it sweeps carriers/ first) or $here/singbox.sh build $holder" ;;
