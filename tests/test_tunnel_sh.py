@@ -130,3 +130,20 @@ def test_add_keepalive_replaces_any():
     out = subprocess.run([BASH, "-c", functions("add_keepalive") + "\nadd_keepalive"],
                          input=config, capture_output=True, text=True).stdout
     assert out == "[Peer]\nEndpoint = h:1\nPersistentKeepalive = 25\n"
+
+
+def test_render_reads_keys_in_any_case(tmp_path):
+    """As wg-quick does: a lower-case hook, table or endpoint is still one."""
+    path = tmp_path / "t.conf"
+    path.write_text("[interface]\npostup = touch /tmp/owned\ntable = auto\n"
+                    "[peer]\nendpoint = vpn.example.net:51820 # home\n")
+    out = bash(functions("render"), 'render "$1" full 192.0.2.1', str(path)).stdout
+    assert out == "[interface]\nTable = off\n[peer]\nEndpoint = 192.0.2.1:51820\n"
+
+
+def test_ipv6_found_on_any_address_line():
+    """take_traffic gives IPv6 its routes when any Address is IPv6: wgcf writes one line per family."""
+    conf = os.path.join(GOLDEN, "edge1", "config", "warp.edge1.conf")
+    check = "list_of \"$1\" Address | grep -q ':'"
+    assert bash(functions("conf_vals", "list_of"), check, conf).returncode == 0
+    assert check.replace("list_of", "conf_val") not in source()      # not the first line only

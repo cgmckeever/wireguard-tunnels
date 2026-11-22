@@ -290,13 +290,13 @@ kind_of() {
 #           any user process of yours can edit
 render() {
     awk -v kind="$2" -v ip="$3" '
-        { sub(/\r$/, "") }
-        tolower($0) ~ /^[[:space:]]*(preup|postup|predown|postdown)[[:space:]]*=/ { next }
-        /^[[:space:]]*\[Interface\]/ { print; if (kind == "full") print "Table = off"; sec = "i"; next }
-        /^[[:space:]]*\[Peer\]/      { print; sec = "p"; next }
-        sec == "i" && /^[[:space:]]*Table[[:space:]]*=/ && kind == "full" { next }
-        /^[[:space:]]*Endpoint[[:space:]]*=/ {
-            port = $0; sub(/.*:/, "", port)
+        { sub(/\r$/, ""); l = tolower($0) }      # keys in any case, as wg-quick reads them
+        l ~ /^[[:space:]]*(preup|postup|predown|postdown)[[:space:]]*=/ { next }
+        l ~ /^[[:space:]]*\[interface\]/ { print; if (kind == "full") print "Table = off"; sec = "i"; next }
+        l ~ /^[[:space:]]*\[peer\]/      { print; sec = "p"; next }
+        sec == "i" && l ~ /^[[:space:]]*table[[:space:]]*=/ && kind == "full" { next }
+        l ~ /^[[:space:]]*endpoint[[:space:]]*=/ {
+            port = $0; sub(/#.*/, "", port); sub(/.*:/, "", port); gsub(/[[:space:]]/, "", port)
             print "Endpoint = " ip ":" port
             next
         }
@@ -312,15 +312,9 @@ add_keepalive() {
          l ~ /^[[:space:]]*endpoint[[:space:]]*=/ { print "PersistentKeepalive = 25" }'
 }
 
-# WARP for wg-quick: no PostUp (the daemon does the routes), a keepalive
-render_warp() {
-    awk '
-        { sub(/\r$/, "") }
-        /^[[:space:]]*(PostUp|PostDown|PreUp|PreDown|Table)[[:space:]]*=/ { next }
-        /^[[:space:]]*\[Interface\]/ { print; print "Table = off"; next }
-        { print }
-    ' "$1" | add_keepalive
-}
+# WARP for wg-quick: rendered as a full tunnel (no hooks, Table = off: the
+# daemon does the routes) at its own endpoint, with a keepalive
+render_warp() { render "$1" full "$(conf_val "$1" Endpoint | host_of)" | add_keepalive; }
 
 resolve() {
     if [[ "$1" =~ ^[0-9.]+$ || "$1" == *:* ]]; then echo "$1"; return; fi
@@ -362,6 +356,7 @@ cmd_import_root() {
     # The name column fits the longest name, new or old
     w=$( { for f in "$src"/*.conf; do basename "$f" .conf; done; cut -f1 "$TSV" 2>/dev/null; } \
         | awk '{ if (length > m) m = length } END { print (m > 28 ? m : 28) }')
+    add_row() { rows+="$1"$'\t'"$2"$'\t'"$3"$'\t'"$4"$'\n'; }   # add_row <name> <iface> <kind> <ip>: the new TSV
     row() {  # row <name> <kind> <iface> <state>
         if [ -n "$changes" ] && [ "$4" = unchanged ]; then
             same=$((same + 1)); return
@@ -391,7 +386,14 @@ cmd_import_root() {
         host=$(conf_val "$f" Endpoint | host_of)
         ip=$(resolve "$host")
         if [ -z "$ip" ]; then
-            row "$name" "$kind" - "skipped: can't resolve ${host}"
+            # No DNS right now (the kill switch on, say): the copy from before stays
+            read -r iface _ ip <<< "$(tsv_get "$name")"
+            if [ -n "$iface" ]; then
+                add_row "$name" "$iface" "$kind" "$ip"
+                row "$name" "$kind" "$iface" "kept: can't resolve ${host} (the copy from before stays)"
+            else
+                row "$name" "$kind" - "skipped: can't resolve ${host}"
+            fi
             continue
         fi
         # The daemon pins a full or warped tunnel's server to the IPv4 gateway
@@ -422,16 +424,16 @@ cmd_import_root() {
         fi
         state=$(settle "$tmp" "$out")
         [ "$name" = "$active" ] && [ "$state" = updated ] && state="updated (up now: re-run tunnel.sh up)"
-        rows+="${name}"$'\t'"${iface}"$'\t'"${kind}"$'\t'"${ip}"$'\n'
+        add_row "$name" "$iface" "$kind" "$ip"
         row "$name" "$kind" "$iface" "$state"
     done
 
-    # Tunnels gone from the export: removed, unless up or asked for
+    # Tunnels gone from the export: removed, unless up or asked for, or kept above
     while IFS=$'\t' read -r name iface kind ip; do
         [ -n "$name" ] || continue
         printf '%s' "$rows" | awk -F'\t' -v n="$name" '$1 == n {f = 1} END {exit !f}' && continue
         if [ "$name" = "$active" ] || [ "$name" = "$wanted" ]; then
-            rows+="${name}"$'\t'"${iface}"$'\t'"${kind}"$'\t'"${ip}"$'\n'
+            add_row "$name" "$iface" "$kind" "$ip"
             row "$name" "$kind" "$iface" "kept: in use (tunnel.sh down, then import again)"
         else
             [ -n "$dry" ] || rm -f "$CONF/$iface.conf"
@@ -663,7 +665,7 @@ routes_via() { [ "$(route_if "$1")" = "$(utun_of "$2")" ]; }
 take_traffic() {
     local u; u=$(utun_of "$1")
     add_routes -interface "$u" -- $V4_QUARTERS
-    if conf_val "$CONF/$1.conf" Address | grep -q ':'; then
+    if list_of "$CONF/$1.conf" Address | grep -q ':'; then     # every line: wgcf writes one per family
         add_routes -interface "$u" -- $V6_QUARTERS
     fi
 }
@@ -808,19 +810,19 @@ exit_stale() {
 # Between watchdog runs: has the network changed (gateway appeared or moved,
 # or the pinned route went missing)? Then the watchdog runs now, not in 30s.
 net_changed() {
-    local gw ip pgw cur
+    local gw ip cur
     gw=$(gateway)
     if [ "$gw" != "$NET_GW" ]; then
         NET_GW="$gw"
         [ -n "$gw" ] && return 0
     fi
     [ -n "$gw" ] || return 1
-    read -r ip pgw 2>/dev/null < "$RUN/pin" || return 1
+    read -r ip _ 2>/dev/null < "$RUN/pin" || return 1
     cur=$(route_gw "$ip")
     [ "$cur" != "$gw" ]
 }
 
-# state, one word the menu shows as it is (only what the daemon has seen):
+# state, a line whose first word is what the menu shows (only what the daemon has seen):
 #   up <name>            the exit has a recent handshake
 #   reconnecting <name>  up, but the exit has been silent over STALE_SECS
 #   connecting <name>    applying an up (also a watchdog restart)
@@ -976,8 +978,7 @@ cmd_breakglass_root() {
     echo "== daemon"
     [ -d "$STATE" ] && put "$STATE/desired" "down" \
         && echo "  wanted: down (a reboot won't bring a tunnel back)"
-    launchctl bootout system/"$LABEL" 2>/dev/null && echo "  stopped ${LABEL}"
-    wait_until 10 eval '! loaded'   # bootout returns before it's gone: it could still add routes
+    stop_daemon && echo "  stopped ${LABEL}"
 
     echo "== wg-quick"
     # Route monitors first: they put routes and DNS back on every network change
@@ -1042,13 +1043,15 @@ cmd_breakglass_root() {
 }
 
 loaded() { launchctl print system/"$LABEL" >/dev/null 2>&1; }
+# stop_daemon: bootout, then wait until it's gone (bootout returns first, and
+# until then the daemon can still add routes)
+stop_daemon() { launchctl bootout system/"$LABEL" 2>/dev/null || return 1; wait_until 10 eval '! loaded'; }
 
 # bootout returns before the job is gone; bootstrap too soon fails with
 # "5: Input/output error"
 restart_daemon() {
     local i
-    launchctl bootout system/"$LABEL" 2>/dev/null
-    wait_until 10 eval '! loaded'
+    stop_daemon
     for i in 1 2 3 4 5; do
         launchctl bootstrap system "$PLIST" 2>/dev/null && return 0
         loaded && return 0
@@ -1061,8 +1064,7 @@ cmd_uninstall_root() {
     need_root uninstall
     put "$STATE/desired" "down" && put "$RUN/request" "uninstall.$$"
     sleep 3
-    launchctl bootout system/"$LABEL" 2>/dev/null
-    wait_until 10 eval '! loaded'
+    stop_daemon
     teardown; disarm
     rm -f "$PLIST" "$INSTALLED" "$RUN/status" "$RUN/progress" "$RUN/request"
     echo "Removed ${INSTALLED} and ${PLIST}; configs kept in ${ETC}"
@@ -1480,12 +1482,11 @@ cmd_extract() {
     rm -rf "$tmp"
 }
 
-# import [dir]: install every .conf in this Mac's config/ (or dir) for the
-# daemon. Tunnels no longer there are removed (unless up right now).
+# import [dir] [-y]: install every .conf in this Mac's config/ (or dir) for
+# the daemon. Tunnels no longer there are removed (unless up or asked for).
 # Without a dir it first sweeps this Mac's carriers/ into config/
-# (wgwarp-sweep.sh), as singbox.sh build does for its devices.
-# import [dir] [-y]: shows what it would do and asks first; -y, or no terminal
-# (the menu bar), goes ahead without asking
+# (wgwarp-sweep.sh), as singbox.sh build does for its devices. It shows what
+# it would do and asks first; -y, or no terminal (the menu bar), goes ahead.
 cmd_import() {
     local src="" yes="" a f n=0 answer dir sweep previewed=""
     for a in "$@"; do
