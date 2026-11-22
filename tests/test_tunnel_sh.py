@@ -27,12 +27,33 @@ def test_the_same_keepalive_and_warp_overhead():
     assert set(re.findall(r"\$\(\(cm - (\d+)\)\)", sh)) == {str(store.WARP_OVERHEAD)}
 
 
+def functions(*names: str) -> str:
+    """Those functions' definitions from tunnel.sh, to run on their own."""
+    out = []
+    for n in names:
+        fn = re.search(rf"^{n}\(\) \{{.*?^\}}$|^{n}\(\) \{{[^\n]*\}}$", source(), re.M | re.S)
+        assert fn, f"{n} is gone from tunnel.sh"
+        out.append(fn.group(0))
+    return "\n".join(out)
+
+
+def bash(defs: str, call: str, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["bash", "-c", f"{defs}\n{call}", "_", *args], capture_output=True, text=True)
+
+
 def swept_ok(conf: str, warp_host: str) -> subprocess.CompletedProcess:
     """tunnel.sh's own check of a warped config, run alone."""
-    fn = re.search(r"^swept_ok\(\) \{.*?^\}$", source(), re.M | re.S)
-    assert fn, "swept_ok is gone from tunnel.sh"
-    return subprocess.run(["bash", "-c", fn.group(0) + '\nswept_ok "$1" "$2"', "_", conf, warp_host],
-                          capture_output=True, text=True)
+    return bash(functions("conf_vals", "list_of", "swept_ok"), 'swept_ok "$1" "$2"', conf, warp_host)
+
+
+@pytest.mark.parametrize("line,on", [("PersistentKeepalive = 25", True), ("persistentkeepalive=25\r", True),
+                                     ("PersistentKeepalive = 0", False), ("PersistentKeepalive = off", False),
+                                     ("", False)])
+def test_has_keepalive_as_wgtun_reads_it(tmp_path, line, on):
+    path = tmp_path / "t.conf"
+    path.write_text(f"[Peer]\nEndpoint = h:1\n{line}\n")
+    sh = bash(functions("conf_vals", "conf_val", "has_keepalive"), 'has_keepalive "$1"', str(path)).returncode == 0
+    assert sh == on == bool(Conf.read(str(path)).keepalive())
 
 
 @pytest.mark.parametrize("conf", [os.path.join(d, f) for d, _, files in os.walk(GOLDEN) for f in files

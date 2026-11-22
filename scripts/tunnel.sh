@@ -45,8 +45,7 @@
 #                           power cycles Wi-Fi if it has no address. Trusts no state.
 #
 # up, down, pause, resume, import, rotate-warp, diag, update, install, uninstall
-# and breakglass use sudo
-# (admin users).
+# and breakglass use sudo (admin users).
 #
 # install.sh (in this repo) sets up what this needs: wireguard-tools, wgcf,
 # this Mac's WARP account and config, and the daemon.
@@ -162,7 +161,7 @@ cmd_default() {
             pick="$answer"
         fi
     fi
-    [ -d "$TUNNELS/$pick" ] && [[ "$pick" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] \
+    [ -d "$TUNNELS/$pick" ] && valid_device "$pick" \
         || die "No device folder ${TUNNELS}/${pick}"
     [ "$pick" = "$cur" ] && { echo "default: ${pick}"; return 0; }
     put "$DEFAULT_FILE" "$pick" 644 || die "Can't write ${DEFAULT_FILE}"
@@ -180,7 +179,7 @@ mac_dir() {
         dev=$(cat "$DEFAULT_FILE" 2>/dev/null)
         [ -n "$dev" ] || exit 1
     fi
-    [[ "$dev" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]] || die "${DEFAULT_FILE} doesn't hold a device name: tunnel.sh default to pick one"
+    valid_device "$dev" || die "${DEFAULT_FILE} doesn't hold a device name: tunnel.sh default to pick one"
     [ -d "$TUNNELS/$dev" ] || die "The default device ${dev} has no folder ${TUNNELS}/${dev}: tunnel.sh default to pick another"
     echo "$TUNNELS/$dev"
 }
@@ -192,17 +191,34 @@ put() {
     printf '%s\n' "$2" > "$tmp" && chmod "${3:-644}" "$tmp" && mv -f "$tmp" "$1"
 }
 
-# conf_val <file> <key>: the first value of key (any case), everything after
-# the first "=" (so a base64 key keeps its "=" padding)
-conf_val() {
+# conf_vals <file> <key>: every value of key (any case), everything after
+# the first "=" (so a base64 key keeps its "=" padding), CR line ends dropped
+conf_vals() {
     awk -v k="$2" '
         { line = $0; sub(/\r$/, "", line) }
         tolower(line) ~ "^[[:space:]]*" tolower(k) "[[:space:]]*=" {
             v = substr(line, index(line, "=") + 1)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
-            print v; exit
+            print v
         }' "$1"
 }
+conf_val() { conf_vals "$1" "$2" | head -1; }     # the first
+# list_of <file> <key>: every comma-separated entry of every key line (AllowedIPs, DNS)
+list_of() { conf_vals "$1" "$2" | tr ', \t' '\n\n\n' | grep .; }
+# same_key <conf> <conf>: both on one private key (a WARP config, say)
+same_key() { [ "$(conf_val "$1" PrivateKey)" = "$(conf_val "$2" PrivateKey)" ]; }
+# has_keepalive <conf>: a PersistentKeepalive that's on (not 0 or off). Only
+# such a tunnel must keep handshaking: an idle one without has no handshakes.
+has_keepalive() {
+    local v
+    [ -f "$1" ] || return 1
+    v=$(conf_val "$1" PersistentKeepalive)
+    [ -n "$v" ] && [ "$v" != 0 ] && [ "$v" != off ]
+}
+# valid_device <name>: a device folder's name (letters, digits, . _ -, not starting with .)
+valid_device() { [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]]; }
+# joined: stdin's lines as "a, b, c"
+joined() { paste -sd, - | sed 's/,/, /g'; }
 
 host_of() { sed -E 's/^\[?([^]]*)\]?:[0-9]+$/\1/'; }
 
@@ -211,6 +227,7 @@ gateway() {
 }
 
 route_if() { route -n get "$1" 2>/dev/null | awk '/interface:/ {print $2}'; }
+route_gw() { route -n get "$1" 2>/dev/null | awk '/gateway:/ {print $2}'; }
 
 # Real utunN behind a wg-quick interface name, empty if it isn't up
 utun_of() {
@@ -238,7 +255,7 @@ tsv_get() {  # tsv_get <name> — "iface kind endpoint"
 swept_ok() {  # swept_ok <conf> <warp-endpoint>
     local ips e p
     grep -qiE '^[[:space:]]*DNS[[:space:]]*=' "$1" && { echo "has a DNS line"; return 1; }
-    ips=$(grep -iE '^[[:space:]]*AllowedIPs[[:space:]]*=' "$1" | sed 's/^[^=]*=//' | tr ', \t\r' '\n\n\n\n' | grep .)
+    ips=$(list_of "$1" AllowedIPs)
     grep -qx "$2/32" <<< "$ips" || { echo "AllowedIPs lacks the WARP endpoint $2/32"; return 1; }
     for e in $ips; do
         p="${e#*/}"
@@ -252,7 +269,7 @@ swept_ok() {  # swept_ok <conf> <warp-endpoint>
 kind_of() {
     local ips
     case "$1" in "$TUNNEL_PREFIX"*) echo warped; return ;; esac
-    ips=$(grep -iE '^[[:space:]]*AllowedIPs[[:space:]]*=' "$2" | sed 's/^[^=]*=//' | tr ', \t\r' '\n\n\n\n')
+    ips=$(list_of "$2" AllowedIPs)
     if grep -qxE '[0-9.]+/0' <<< "$ips" \
         || { grep -qx '0\.0\.0\.0/1' <<< "$ips" && grep -qx '128\.0\.0\.0/1' <<< "$ips"; }; then
         echo full
@@ -261,13 +278,13 @@ kind_of() {
     fi
 }
 
-# render <src> <kind> <warp-endpoint-host> <endpoint-ip>
-#   warped: AllowedIPs = WARP endpoint only, no DNS, keepalive
+# render <src> <kind> <endpoint-ip>: the daemon's copy of a tunnel (a warped
+# one arrives as the sweep wrote it: swept_ok checked it)
 #   full:   Table = off (the daemon does the routes), DNS kept
-#   split:  as is
+#   warped, split: as is
 #   all:    Endpoint host resolved to the IP (DNS can be cut off while switching)
 render() {
-    awk -v kind="$2" -v wep="$3" -v ip="$4" '
+    awk -v kind="$2" -v ip="$3" '
         { sub(/\r$/, "") }
         /^[[:space:]]*\[Interface\]/ { print; if (kind == "full") print "Table = off"; sec = "i"; next }
         /^[[:space:]]*\[Peer\]/      { print; sec = "p"; next }
@@ -298,9 +315,9 @@ resolve() {
     dscacheutil -q host -a name "$1" | awk '/^ip_address:/ {print $2; exit}'
 }
 
-# _import <dir> [dry]: dry reports what an import would do and changes nothing
-# _import <dir> [dry] [changes]: changes prints only what changed (the dry run
-# before it showed the rest)
+# _import <dir> [dry] [changes]: dry reports what an import would do and
+# changes nothing; changes prints only what changed (the dry run before it
+# showed the rest)
 cmd_import_root() {
     local src="$1" dry="${2:-}" changes="${3:-}" f name kind ep host ip iface out tmp state n wep active why rows="" seen="" w same=0
     need_root import
@@ -325,7 +342,7 @@ cmd_import_root() {
     render_warp "$WARP_SRC" > "$tmp"
     state=$(settle "$tmp" "$CONF/warp.conf")
 
-    active=$(awk '$1 == "name" {print $2}' "$RUN/status" 2>/dev/null)
+    active=$(st name)
     # The name column fits the longest name, new or old
     w=$( { for f in "$src"/*.conf; do basename "$f" .conf; done; cut -f1 "$TSV" 2>/dev/null; } \
         | awk '{ if (length > m) m = length } END { print (m > 28 ? m : 28) }')
@@ -357,7 +374,7 @@ cmd_import_root() {
             continue
         fi
         # Keep a tunnel's interface name across imports; new ones get the next free wtN
-        iface=$(awk -F'\t' -v n="$name" '$1 == n {print $2; exit}' "$TSV" 2>/dev/null)
+        read -r iface _ <<< "$(tsv_get "$name")"
         if [ -z "$iface" ]; then
             n=0
             while awk -F'\t' '{print $2}' "$TSV" 2>/dev/null | grep -qx "wt$n" || [[ " $seen " == *" wt$n "* ]]; do
@@ -369,13 +386,12 @@ cmd_import_root() {
 
         out="$CONF/$iface.conf"
         tmp=$(tmpfile import)
-        render "$f" "$kind" "$wep" "$ip" > "$tmp"
+        render "$f" "$kind" "$ip" > "$tmp"
         # WARP alone: a keepalive, as WARP has inside a warped tunnel. It
         # handshakes at once, and a stale handshake means trouble (the watchdog).
         # The sweep's warp.<device>.conf has one already: this is for a folder
         # imported from elsewhere.
-        if [ "$(conf_val "$f" PrivateKey)" = "$(conf_val "$WARP_SRC" PrivateKey)" ] \
-            && ! grep -qi '^[[:space:]]*PersistentKeepalive' "$tmp"; then
+        if same_key "$f" "$WARP_SRC" && ! grep -qi '^[[:space:]]*PersistentKeepalive' "$tmp"; then
             sed -i '' -E 's/^([[:space:]]*Endpoint[[:space:]]*=.*)$/\1\
 PersistentKeepalive = 25/' "$tmp"
         fi
@@ -452,7 +468,7 @@ fit_warp_mtu() {  # fit_warp_mtu <carrier iface> <name>
 # each time, so a better network gets it back. Measured on up, on a gateway
 # change, and every 5 minutes (a router may switch its exit behind the same
 # gateway).
-warp_alone() { [ "$(conf_val "$CONF/$1.conf" PrivateKey)" = "$(conf_val "$CONF/warp.conf" PrivateKey)" ]; }
+warp_alone() { same_key "$CONF/$1.conf" "$CONF/warp.conf"; }
 probe() { ping -c2 -i0.2 -t3 -D -s $(( $1 - 28 )) "$PROBE_IP" >/dev/null 2>&1; }
 fit_path_mtu() {  # fit_path_mtu <iface> <name>
     local u full prev
@@ -479,19 +495,33 @@ warp_guard() {
     [ -n "$d" ] && echo "$a.$b.$c.$(( d & 254 ))/31"
 }
 
+# The kill switch. $RUN/armed holds the WARP guard it added, so a new WARP
+# endpoint (rotate-warp, a new .warp-endpoint) moves the guard, and disarm
+# takes off the one that's there (as pin/unpin do with $RUN/pin).
 arm() {
-    [ -f "$RUN/armed" ] && return
-    log "kill switch on"
-    add_routes 127.0.0.1 -reject -- $V4_HALVES $V6_HALVES
-    local g; g=$(warp_guard); [ -n "$g" ] && add_routes 127.0.0.1 -reject -- "$g"
-    : > "$RUN/armed"
+    local g was
+    g=$(warp_guard)
+    if [ -f "$RUN/armed" ]; then
+        was=$(cat "$RUN/armed")
+        [ "$was" = "$g" ] && return
+        log "kill switch: WARP guard ${was:-none} -> ${g:-none}"
+        [ -n "$was" ] && del_routes "$was"
+    else
+        log "kill switch on"
+        add_routes 127.0.0.1 -reject -- $V4_HALVES $V6_HALVES
+    fi
+    [ -n "$g" ] && add_routes 127.0.0.1 -reject -- "$g"
+    put "$RUN/armed" "$g"
 }
 
 disarm() {
+    local g
     [ -f "$RUN/armed" ] || return
     log "kill switch off"
     del_routes $V4_HALVES $V6_HALVES
-    local g; g=$(warp_guard); [ -n "$g" ] && del_routes "$g"
+    # One armed before the guard was recorded holds nothing: today's guard
+    g=$(cat "$RUN/armed"); [ -n "$g" ] || g=$(warp_guard)
+    [ -n "$g" ] && del_routes "$g"
     rm -f "$RUN/armed"
 }
 
@@ -519,13 +549,15 @@ wgq() {
     out=$(mktemp "$RUN/.wgq.XXXXXX")
     wg-quick "$1" "$CONF/$2.conf" > "$out" 2>&1
     rc=$?
-    # wg quotes a key it rejects: never let one reach the log
-    grep -v 'networksetup -' "$out" \
-        | sed -E "s/[A-Za-z0-9+/]{42,43}=?/<key>/g; s/^/  [$2] /"
+    wgq_filter "$2" < "$out"
     rm -f "$out"
     [ "$1" = down ] && reap_monitors "$2"
     return "$rc"
 }
+
+# wgq_filter <iface>: wg-quick's output for the log, its networksetup chatter
+# dropped. wg quotes a key it rejects: never let one reach the log.
+wgq_filter() { grep -v 'networksetup -' | sed -E "s/[A-Za-z0-9+/]{42,43}=?/<key>/g; s/^/  [$1] /"; }
 
 # wg-quick leaves a route monitor behind each up; it quits on a route change
 # once its utun is gone. A quick restart reuses the utun name, so it never sees
@@ -560,7 +592,7 @@ teardown() {
             wgq down "$i"
         else
             # Not one of our copies: down through wg-quick's own config
-            wg-quick down "$i" 2>&1 | grep -v 'networksetup -' | sed "s/^/  [$i] /"
+            wg-quick down "$i" 2>&1 | wgq_filter "$i"
         fi
     done
     unpin
@@ -610,7 +642,7 @@ take_traffic() {
 apply_up() {
     local name="$1" iface kind ip exit_if
     read -r iface kind ip <<< "$(tsv_get "$name")"
-    [ -n "$iface" ] && [ -f "$CONF/$iface.conf" ] || { progress "fail: no tunnel '${name}' (tunnel.sh import?)"; return 1; }
+    [ -n "$iface" ] && [ -f "$CONF/$iface.conf" ] || { failed "no tunnel '${name}' (tunnel.sh import?)"; return 1; }
 
     if [ "$kind" = split ]; then
         teardown; disarm
@@ -621,14 +653,14 @@ apply_up() {
     fi
 
     progress "starting ${name} (${iface})"
-    wgq up "$iface" || { progress "fail: wg-quick up ${iface}"; return 1; }
+    wgq up "$iface" || { failed "wg-quick up ${iface}"; return 1; }
     exit_if="$iface"
 
     if [ "$kind" = warped ]; then
         wait_until 5 routes_via "$(warp_ep)" "$iface" \
             || { failed "WARP endpoint doesn't route into ${iface}"; return 1; }
         progress "starting WARP inside ${name}"
-        wgq up warp || { progress "fail: wg-quick up warp"; return 1; }
+        wgq up warp || { failed "wg-quick up warp"; return 1; }
         fit_warp_mtu "$iface" "$name"
         exit_if=warp
     fi
@@ -685,7 +717,7 @@ resume_if_due() {
 
 # Every $WATCH_SECS while up
 watchdog() {
-    local name iface kind exit_if ip pgw gw cur age
+    local want name iface kind exit_if ip pgw gw cur
     read -r want _ 2>/dev/null < "$STATE/desired"
     [ "$want" = up ] || return
     if ! read -r name iface kind exit_if 2>/dev/null < "$RUN/current"; then
@@ -697,7 +729,7 @@ watchdog() {
     if [ "$kind" != split ]; then
         read -r ip pgw 2>/dev/null < "$RUN/pin"
         gw=$(gateway)
-        cur=$(route -n get "$ip" 2>/dev/null | awk '/gateway:/ {print $2}')
+        cur=$(route_gw "$ip")
         if [ -n "$gw" ] && [ "$gw" != "$pgw" ]; then
             log "watchdog: gateway ${pgw:-none} -> ${gw}, re-pinning ${ip}"
             pin "$ip"
@@ -716,22 +748,27 @@ watchdog() {
         MTU_TICK=$((MTU_TICK + 1))
         [ "$MTU_TICK" -ge "$MTU_EVERY" ] && { MTU_TICK=0; fit_path_mtu "$iface" "$name"; }
     fi
-    # The exit's handshake: WARP, or the tunnel itself. Only with a keepalive,
-    # without one an idle tunnel has no handshakes either.
-    if grep -qi '^[[:space:]]*PersistentKeepalive' "$CONF/$exit_if.conf" 2>/dev/null; then
-        age=$(hs_age "$exit_if")
-        if [ -z "$age" ] || [ "$age" -gt "$STALE_SECS" ]; then
-            STALE=$((STALE + 1))
-            if [ "$STALE" -eq 2 ]; then
-                log "watchdog: ${exit_if} silent ${age:-?}s — new source port"
-                wg set "$(utun_of "$exit_if")" listen-port 0
-            elif [ "$STALE" -ge 4 ]; then
-                log "watchdog: ${exit_if} still silent — restarting"; apply watchdog; return
-            fi
-        else
-            STALE=0
+    # The exit's handshake: WARP, or the tunnel itself
+    if exit_stale "$exit_if"; then
+        STALE=$((STALE + 1))
+        if [ "$STALE" -eq 2 ]; then
+            log "watchdog: ${exit_if} silent ${AGE:-?}s — new source port"
+            wg set "$(utun_of "$exit_if")" listen-port 0
+        elif [ "$STALE" -ge 4 ]; then
+            log "watchdog: ${exit_if} still silent — restarting"; apply watchdog; return
         fi
+    else
+        STALE=0
     fi
+}
+
+# exit_stale <iface>: an exit with a keepalive that hasn't handshaken in
+# STALE_SECS (AGE: seconds since its last, empty for never). One without a
+# keepalive never is: an idle tunnel has no handshakes either.
+exit_stale() {
+    has_keepalive "$CONF/$1.conf" || return 1
+    AGE=$(hs_age "$1")
+    [ -z "$AGE" ] || [ "$AGE" -gt "$STALE_SECS" ]
 }
 
 # Between watchdog runs: has the network changed (gateway appeared or moved,
@@ -745,7 +782,7 @@ net_changed() {
     fi
     [ -n "$gw" ] || return 1
     read -r ip pgw 2>/dev/null < "$RUN/pin" || return 1
-    cur=$(route -n get "$ip" 2>/dev/null | awk '/gateway:/ {print $2}')
+    cur=$(route_gw "$ip")
     [ "$cur" != "$gw" ]
 }
 
@@ -758,7 +795,8 @@ net_changed() {
 #   paused <name> <t>    pause: down, kill switch off, back at epoch t
 #   down
 write_status() {
-    local name iface kind exit_if out want wname until age state
+    local name iface kind exit_if out want wname until state
+    [ -n "$DAEMON" ] || return 0     # breakglass and install wait too, but aren't the daemon
     read -r want wname until 2>/dev/null < "$STATE/desired"
     out="armed $([ -f "$RUN/armed" ] && echo yes || echo no)"
     out+=$'\n'"desired ${want:-down}${wname:+ $wname}${until:+ $until}"
@@ -778,11 +816,7 @@ write_status() {
         # Only an up decides by what's running: mid-teardown is still down/paused
         if [ "$want" = up ] && [ -z "$CONNECTING" ]; then
             state="up ${name}"
-            # As the watchdog judges it: only an exit with a keepalive must handshake
-            if grep -qi '^[[:space:]]*PersistentKeepalive' "$CONF/$exit_if.conf" 2>/dev/null; then
-                age=$(hs_age "$exit_if")
-                { [ -z "$age" ] || [ "$age" -gt "$STALE_SECS" ]; } && state="reconnecting ${name}"
-            fi
+            exit_stale "$exit_if" && state="reconnecting ${name}"   # as the watchdog judges it
         fi
     fi
     out+=$'\n'"state ${state}"
@@ -793,8 +827,8 @@ write_status() {
 
 cmd_daemon() {
     local req applied="" tick=0
-    NET_GW=$(gateway)
     need_root daemon
+    DAEMON=1 NET_GW=$(gateway)
     mkdir -p "$RUN" "$STATE" && chmod 755 "$RUN" "$STATE"
     rm -f "$RUN/armed" "$RUN/current"   # routes don't survive a reboot; a restart re-applies
     log "daemon start"
@@ -885,8 +919,8 @@ tunnel_dns() {
     store="${1:-$(eval echo "~${SUDO_USER:-root}")/wg-tunnels}"
     for f in "$WARP_SRC" "$CONF"/*.conf "$store"/devices/*/{warp,config,carriers}/*.conf; do
         [ -f "$f" ] || continue
-        awk -F'[[:space:]]*=[[:space:]]*' 'tolower($1) ~ /^[[:space:]]*dns$/ {print $2}' "$f"
-    done | tr ', ' '\n\n' | grep . | sort -u
+        list_of "$f" DNS
+    done | sort -u
 }
 
 # Back to the plain connection without trusting any state: no daemon state,
@@ -920,9 +954,7 @@ cmd_breakglass_root() {
     # Anything still rejecting traffic into lo0 (a kill switch from any version)
     routes=$(netstat -rn | awk '$4 == "lo0" && $3 ~ /[RB]/ {print $1}')
     for f in $routes; do
-        if [[ "$f" == *:* ]]; then route -q -n delete -inet6 "$f" >/dev/null 2>&1
-        else route -q -n delete -inet "$f" >/dev/null 2>&1; fi
-        echo "  removed reject route ${f}"
+        del_routes "$f"; echo "  removed reject route ${f}"
     done
 
     echo "== dns"
@@ -992,11 +1024,15 @@ cmd_uninstall_root() {
 
 # --- user side ---
 
+NOT_INSTALLED="Not installed — run install.sh (or tunnel.sh install for just the daemon)"
+# install_stale: run from the repo, and the installed daemon isn't this copy
+install_stale() { [ "$0" != "$INSTALLED" ] && ! cmp -s "$0" "$INSTALLED"; }
+
 root() {
-    [ -x "$INSTALLED" ] || die "Not installed — run install.sh (or tunnel.sh install for just the daemon)"
-    # Run from the repo and the installed copy is older: update it first (this
-    # restarts the daemon, which re-applies what's wanted)
-    if [ "$0" != "$INSTALLED" ] && ! cmp -s "$0" "$INSTALLED"; then
+    [ -x "$INSTALLED" ] || die "$NOT_INSTALLED"
+    # The installed copy is older: update it first (this restarts the daemon,
+    # which re-applies what's wanted)
+    if install_stale; then
         echo "Updating ${INSTALLED} from $0"
         sudo "$0" _install "$0" >/dev/null || die "Update failed — run: tunnel.sh install"
     fi
@@ -1015,7 +1051,7 @@ ready() {
 }
 
 check_installed() {
-    if [ -x "$INSTALLED" ] && [ "$0" != "$INSTALLED" ] && ! cmp -s "$0" "$INSTALLED"; then
+    if [ -x "$INSTALLED" ] && install_stale; then
         echo "Note: ${INSTALLED} differs from $0 — tunnel.sh update (or the next up/down/import) updates it" >&2
     fi
 }
@@ -1141,7 +1177,7 @@ follow() {
 
 current() {
     local apps
-    apps=$(app_connected | paste -sd, - | sed 's/,/, /g')
+    apps=$(app_connected | joined)
     echo "Current connection:"
     echo "  tunnel: $(st name | grep . || echo none)"
     [ -n "$apps" ] && echo "  WireGuard app: ${apps}"
@@ -1149,9 +1185,9 @@ current() {
 }
 
 cmd_up() {
-    local answer kind tunnel req od
+    local answer kind tunnel od
     ready
-    od=$(app_on_demand | paste -sd, - | sed 's/,/, /g')
+    od=$(app_on_demand | joined)
     [ -z "$od" ] || die "On Demand is on in the WireGuard app for: ${od}
 It reconnects behind the tunnel and breaks it. Turn it off (the tunnel → Edit → uncheck On-Demand), then tunnel.sh up."
     check_installed
@@ -1165,8 +1201,7 @@ It reconnects behind the tunnel and breaks it. Turn it off (the tunnel → Edit 
         tunnel=$(pick "$1" "$kind") || return 1
     fi
     stop_app_tunnels
-    root request up "$tunnel" || return 1
-    follow "$(cat "$RUN/request")"
+    ask up "$tunnel"
 }
 
 # rotate-warp: a new WARP account in this Mac's warp/. The old one waits in
@@ -1196,12 +1231,11 @@ cmd_rotate_warp() {
 
     # A warped tunnel, or WARP alone (warp.<device>), that's up still runs the
     # old keys: reconnect it
-    active=$(awk '$1 == "name" {print $2}' "$RUN/status" 2>/dev/null)
-    kind=$(awk '$1 == "kind" {print $2}' "$RUN/status" 2>/dev/null)
+    active=$(st name)
+    kind=$(st kind)
     if [ -n "$active" ] && { [ "$kind" = warped ] || [ "$active" = "warp.$(basename "$(mac_dir)")" ]; }; then
         echo "== Reconnect ${active}"
-        root request up "$active" || return 1
-        follow "$(cat "$RUN/request")"
+        ask up "$active"
     fi
 }
 
@@ -1225,8 +1259,7 @@ cmd_pause() {
     valid_minutes "$m" || die "Usage: tunnel.sh pause [minutes, 1-1440] (default 10)"
     check_installed
     [ -x "$INSTALLED" ] || die "Not installed: nothing to pause"
-    root request pause "$m" || return 1
-    follow "$(cat "$RUN/request")"
+    ask pause "$m"
 }
 
 cmd_resume() {
@@ -1234,8 +1267,7 @@ cmd_resume() {
     read -r want name _ 2>/dev/null < "$STATE/desired"
     [ "$want" = pause ] || die "Not paused (wanted: ${want:-down})"
     check_installed
-    root request up "$name" || return 1
-    follow "$(cat "$RUN/request")"
+    ask up "$name"
 }
 
 # diag [file]: everything needed to debug, in one file, keys removed. Runs the
@@ -1307,8 +1339,7 @@ cmd_down() {
         echo "The daemon isn't installed, so no tunnel of ours is up. Network still broken? tunnel.sh breakglass"
         return 0
     fi
-    root request down || return 1
-    follow "$(cat "$RUN/request")"
+    ask down
 }
 
 exit_line() {
@@ -1319,7 +1350,7 @@ exit_line() {
         sleep 2
     done
     [ -z "$trace" ] && { echo "exit:   no answer (blocked or offline)"; return; }
-    echo "exit:   $(echo "$trace" | awk -F= '/^ip=/ {print $2}') colo=$(echo "$trace" | awk -F= '/^colo=/ {print $2}') loc=$(echo "$trace" | awk -F= '/^loc=/ {print $2}') warp=$(echo "$trace" | awk -F= '/^warp=/ {print $2}')"
+    echo "$trace" | awk -F= '{v[$1] = $2} END {printf "exit:   %s colo=%s loc=%s warp=%s\n", v["ip"], v["colo"], v["loc"], v["warp"]}'
 }
 
 status() {
@@ -1340,13 +1371,13 @@ status() {
         fi
         [ -n "$(st state)" ] && echo "state:  $(st state | awk '{print $1}')"
         echo "kill switch: $(st armed)"
-        [ -n "$(st name)" ] && echo "up:     $(st name) — $(st iface | awk '{printf "%s %s, handshake %ss ago", $1, $2, ($3 == "" ? "never " : $3)}')"
-        [ -n "$(st warp)" ] && echo "warp:   $(st warp | awk '{printf "%s, handshake %ss ago", $2, ($3 == "" ? "never " : $3)}')"
+        [ -n "$(st name)" ] && echo "up:     $(st name) — $(st iface | awk '{printf "%s %s, handshake %s", $1, $2, ($3 == "" ? "never" : $3 "s ago")}')"
+        [ -n "$(st warp)" ] && echo "warp:   $(st warp | awk '{printf "%s, handshake %s", $2, ($3 == "" ? "never" : $3 "s ago")}')"
         [ -n "$(st pin)" ] && echo "pinned: $(st pin | awk '{print $1 " via " $2}')"
     fi
-    od=$(app_on_demand | paste -sd, - | sed 's/,/, /g')
+    od=$(app_on_demand | joined)
     [ -n "$od" ] && echo "WireGuard app has On Demand on for ${od} — turn it off, tunnel.sh up refuses while it's on"
-    apps=$(app_connected | paste -sd, - | sed 's/,/, /g')
+    apps=$(app_connected | joined)
     [ -n "$apps" ] && echo "WireGuard app has ${apps} on — tunnel.sh up stops it; switch app tunnels on only after tunnel.sh down"
     exit_line
 }
@@ -1408,7 +1439,7 @@ cmd_import() {
     for a in "$@"; do
         case "$a" in -y|--yes) yes=1 ;; "") ;; *) src="$a" ;; esac
     done
-    [ -n "$WGT_TEST" ] || [ -x "$INSTALLED" ] || die "Not installed — run install.sh (or tunnel.sh install for just the daemon)"
+    [ -n "$WGT_TEST" ] || [ -x "$INSTALLED" ] || die "$NOT_INSTALLED"
     if [ -z "$src" ]; then
         dir=$(mac_dir) || exit 1
         src="$dir/config"
