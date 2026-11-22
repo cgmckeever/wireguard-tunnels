@@ -10,26 +10,25 @@ import pytest
 from wgtun import singbox, sweep
 from wgtun.store import Error
 
-from .conftest import client
-
-KA = "persistent_keepalive_interval"
+from .conftest import client, fake_command
 
 
-def build(store, device: str):
+def build(tmp_store, device: str):
     """(profiles by file name, parsed; what build said)"""
     said = []
-    swept = sweep.Sweep(store.path(f"devices/{device}"), app_column=False)
+    swept = sweep.Sweep(tmp_store.path(f"devices/{device}"), app_column=False)
     files = singbox.plan(singbox.Device(device, "build"), swept, lambda text, err: said.append(text))
     return {f: json.loads(t) for f, t in files.items()}, said
 
 
 @pytest.fixture
-def phone(store):
-    store.device("ph")
-    store.put("devices/ph/carriers/proton.chi.conf", client("proton", mtu=1280, head="# device-network: 10.9.8.0/24"))
-    store.put("devices/ph/config/dengar.chi.ph.conf", client("dengar.chi", keepalive=30, psk=True))
-    store.put("devices/ph/config/dengar.ph.conf", client("dengar"))
-    return store
+def phone(tmp_store):
+    tmp_store.device("ph")
+    tmp_store.put("devices/ph/carriers/proton.chi.conf",
+                  client("proton", mtu=1280, head="# device-network: 10.9.8.0/24"))
+    tmp_store.put("devices/ph/config/dengar.chi.ph.conf", client("dengar.chi", keepalive=30, psk=True))
+    tmp_store.put("devices/ph/config/dengar.ph.conf", client("dengar"))
+    return tmp_store
 
 
 def picks(profile: dict) -> list:
@@ -37,7 +36,7 @@ def picks(profile: dict) -> list:
 
 
 def keepalives(profile: dict) -> dict:
-    return {ep["tag"]: ep["peers"][0].get(KA) for ep in profile["endpoints"]}
+    return {ep["tag"]: ep["peers"][0].get(singbox.KEEPALIVE) for ep in profile["endpoints"]}
 
 
 def test_files(phone):
@@ -110,7 +109,9 @@ def test_nord_configs_share_their_key(phone):
     phone.device("tv", carriers=False, warp=False)
     phone.put("devices/tv/config/nord.tv.conf", "# source: nord us\n" + client("nord"))
     phone.put("devices/ph/config/nord.ph.conf", "# source: nord us\n" + client("nord"))
-    build(phone, "ph")
+    phone.put("devices/ph/config/nord2.ph.conf", "# source: nord us\n" + client("nord"))
+    _, said = build(phone, "ph")
+    assert not any("same private key" in s for s in said)
 
 
 def test_a_key_twice_on_one_device_is_a_note(phone):
@@ -133,12 +134,12 @@ def test_an_orphan_isnt_built(phone):
     assert "skipped warped.gone.ph: no usable carrier for it in carriers/ (delete it if that's for good)" in said
 
 
-def test_plain_device_and_nothing_to_build(store):
-    store.device("tv", carriers=False, warp=False)
+def test_plain_device_and_nothing_to_build(tmp_store):
+    tmp_store.device("tv", carriers=False, warp=False)
     with pytest.raises(Error, match="nothing to build"):
-        build(store, "tv")
-    store.put("devices/tv/config/srv.tv.conf", client("srv"))
-    assert sorted(build(store, "tv")[0]) == ["srv.tv.json", "tv.json"]
+        build(tmp_store, "tv")
+    tmp_store.put("devices/tv/config/srv.tv.conf", client("srv"))
+    assert sorted(build(tmp_store, "tv")[0]) == ["srv.tv.json", "tv.json"]
 
 
 def profile_states(out: str) -> dict:
@@ -175,10 +176,14 @@ def test_a_broken_warp_profile_isnt_built(phone, capsys):
         singbox.cmd_build("ph")
 
 
-def test_cli(store, capsys):
+def test_cli(tmp_store, capsys):
     assert singbox.main(["--help"]) == 0
     assert "singbox.sh build <device>" in capsys.readouterr().out
-    assert singbox.main(["nope"]) == 1
+    for args in (["nope"], ["list", "x"], ["build", "a", "b"]):
+        with pytest.raises(SystemExit):
+            singbox.main(args)
+        assert "usage: singbox.sh" in capsys.readouterr().err
+    assert singbox.main([]) == 1
     with pytest.raises(SystemExit):
         singbox.main(["build", "bad name"])
     assert "device names are letters" in capsys.readouterr().err
@@ -188,3 +193,26 @@ def test_list(phone, capsys):
     phone.put("devices/.default", "ph\n")
     singbox.cmd_list()
     assert capsys.readouterr().out.split("\n")[1].split() == ["ph", "(this", "Mac)", "1", "2", "yes", "0"]
+
+
+def test_a_name_two_endpoints_would_share(phone):
+    phone.put("devices/ph/config/tunnel.conf", client("t"))          # "tunnel" is the picker's
+    with pytest.raises(Error, match="more than one tunnel would be named: tunnel "):
+        build(phone, "ph")
+
+
+def test_sing_box_check_failing_changes_nothing(phone, tmp_path, monkeypatch):
+    fake_command(tmp_path, monkeypatch, "sing-box",
+                 'grep -q warped "$3" && { echo "bad profile" >&2; exit 1; }; exit 0')
+    with pytest.raises(Error, match=r"sing-box check failed for warped\.proton\.chi\.ph\.json: no profile changed"):
+        singbox.cmd_build("ph")
+    assert not os.path.exists(phone.path("devices/ph/sing-box/ph.json"))
+
+
+def test_new(tmp_store, fake_wgcf, capsys):
+    singbox.cmd_new("tv")
+    out = capsys.readouterr().out
+    assert out.startswith("WARP account: registered\nWireGuard app config: ")
+    assert os.path.isfile(tmp_store.path("devices/tv/config/warp.tv.conf"))
+    singbox.cmd_new("tv")
+    assert capsys.readouterr().out.startswith("WARP account: already there\n")

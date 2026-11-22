@@ -59,6 +59,11 @@ def test_warped_name_device_is_literal():
     assert store.warped_name("xaby.conf", "a.b") == "warped.xaby.a.b"   # "." in a device isn't "any character"
 
 
+@pytest.fixture
+def store_root(tmp_store):
+    return tmp_store, tmp_store.path(tmp_store.device("d"))
+
+
 def test_warp_endpoint_device_then_store_then_cloudflare(store_root):
     s, dev = store_root
     assert store.warp_endpoint(dev) == store.WARP_ENDPOINT
@@ -71,9 +76,6 @@ def test_warp_endpoint_device_then_store_then_cloudflare(store_root):
         store.warp_endpoint(dev)
 
 
-@pytest.fixture
-def store_root(store):
-    return store, store.path(store.device("d"))
 
 
 def test_sweep_owned_by_name():
@@ -96,3 +98,13 @@ def test_collated_is_the_shells_order(monkeypatch):
 def test_collated_on_a_locale_this_mac_doesnt_have(monkeypatch):
     monkeypatch.setenv("LC_ALL", "xx_NOPE.UTF-8")
     assert store.collated(["b", "a", "B"]) == ["B", "a", "b"]     # C, as bash falls back to
+
+
+def test_warped_name_device_in_it_twice():
+    """Once at the front (dropped) and once at the end, where it stays with its separator."""
+    assert store.warped_name("iphone-x_iphone.conf", "iphone") == "warped.x_iphone"
+    assert store.warped_name("a.iphone.b.iphone.c.conf", "iphone") == "warped.a.b.c.iphone"
+
+
+def test_an_endpoint_needs_a_host():
+    assert Conf(client("a", endpoint=":51820")).problem() == "Endpoint isn't host:port"

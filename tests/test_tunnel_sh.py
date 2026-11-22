@@ -60,13 +60,13 @@ def test_has_keepalive_as_wgtun_reads_it(tmp_path, line, on):
                                   if os.path.basename(d) == "config" and f.startswith("warped.") and "gone" not in f])
 def test_tunnel_sh_takes_what_the_sweep_writes(conf):
     device_dir = os.path.dirname(os.path.dirname(conf))
-    host = store.warp_endpoint(device_dir).rsplit(":", 1)[0]
+    host = store.warp_net(store.warp_endpoint(device_dir)).split("/")[0]
     result = swept_ok(conf, host)
     assert result.returncode == 0, result.stdout
 
 
 def test_tunnel_sh_refuses_what_the_sweep_wouldnt(tmp_path):
-    good = next(os.path.join(d, f) for d, _, files in os.walk(GOLDEN) for f in files if f == "warped.x.edge1.conf")
+    good = os.path.join(GOLDEN, "edge1", "config", "warped.x.edge1.conf")
     wide = Conf.read(good).rewrite({"AllowedIPs": lambda _l: ["AllowedIPs = 162.159.192.7/32, 10.0.0.0/4"]})
     path = tmp_path / "wide.conf"
     path.write_text(wide)

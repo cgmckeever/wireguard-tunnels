@@ -7,19 +7,22 @@ import contextlib
 import locale
 import os
 import re
+import shutil
+import stat
+import subprocess
 import sys
 import tempfile
-from typing import Callable, Dict, Iterable, List, NoReturn
+from typing import Callable, Dict, Iterable, List, NoReturn, Optional, Tuple
 
-from .conf import Conf, Error, read_text
+from .conf import Conf, Error, read_text, stem
 
 KEEPALIVE = 25                       # seconds: every one-tunnel config has one
 WARP_ENDPOINT = "162.159.192.1:2408"  # Cloudflare's, unless .warp-endpoint says otherwise
 WARP_MTU = 1280                      # wgcf's, and IPv6's minimum
 WARP_OVERHEAD = 80                   # what a carrier adds to each WARP packet
 PLAIN_MTU = 1420                     # wg-quick's default
+WARPED = "warped."                   # the name of a tunnel that carries WARP starts with it
 SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
-
 
 # What a main() reports as one line instead of a traceback: its own reasons
 # (a file that isn't UTF-8 is one: conf.read_text) and a file it can't read or
@@ -32,12 +35,33 @@ def die(prog: str, msg: str) -> NoReturn:
     sys.exit(1)
 
 
+def run_main(prog: str, body: Callable[[], Optional[int]]) -> int:
+    """A script's main(): umask 077 (everything here holds private keys), and
+    a failure as one line, "<prog>: <why>"."""
+    os.umask(0o077)
+    try:
+        return body() or 0
+    except FAILURES as e:
+        die(prog, str(e))
+
+
+# --- where things are ---
+
 def root() -> str:
     return os.environ.get("WG_TUNNELS") or os.path.expanduser("~/wg-tunnels")
 
 
 def devices_dir() -> str:
     return os.path.join(root(), "devices")
+
+
+def device_dir(device: str) -> str:
+    return os.path.join(devices_dir(), device)
+
+
+def valid_device(name: str) -> bool:
+    """A name a device folder can have (tunnel.sh and install.sh check the same)."""
+    return re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", name) is not None
 
 
 class Folder:
@@ -49,6 +73,7 @@ class Folder:
         self.carriers = os.path.join(path, "carriers")       # WireGuard configs to carry WARP
         self.config = os.path.join(path, "config")           # every tunnel the device runs
         self.warp = os.path.join(path, "warp")               # its wgcf WARP account and profile
+        self.account = os.path.join(self.warp, "wgcf-account.toml")
         self.profile = os.path.join(self.warp, "wgcf-profile.conf")
         self.sing_box = os.path.join(path, "sing-box")       # singbox.sh build's
         self.exports = os.path.join(path, "exports")         # WireGuard app exports (tunnel.sh extract)
@@ -59,9 +84,10 @@ class Folder:
     def of(cls, device: str) -> Folder:
         return cls(device_dir(device))
 
-
-def device_dir(device: str) -> str:
-    return os.path.join(devices_dir(), device)
+    def confs(self) -> List[str]:
+        """Every config the device has: carriers/, config/, and its WARP profile."""
+        profile = [self.profile] if os.path.isfile(self.profile) else []
+        return files_in(self.carriers) + files_in(self.config) + profile
 
 
 def this_mac() -> str:
@@ -90,17 +116,48 @@ def files_in(folder: str, ext: str = ".conf") -> List[str]:
                     if f.endswith(ext) and not f.startswith(".")])
 
 
-def inner_mtu(carrier_mtu: int, warp_mtu: int = WARP_MTU) -> int:
-    """WARP's MTU inside a carrier: its own, lowered when the carrier can't
-    fit that plus what it adds to each packet. (tunnel.sh has its own copy.)"""
-    return min(warp_mtu, carrier_mtu - WARP_OVERHEAD)
-
-
 def all_devices() -> List[str]:
     d = devices_dir()
     if not os.path.isdir(d):
         return []
     return collated([n for n in os.listdir(d) if not n.startswith(".") and os.path.isdir(os.path.join(d, n))])
+
+
+# --- names and numbers ---
+
+def is_warped(name: str) -> bool:
+    return name.startswith(WARPED)
+
+
+def warped_name(carrier: str, device: str) -> str:
+    """The tunnel a carrier becomes, the device always last: x.conf,
+    warped.x.conf and warped-x.conf all become warped.x.<device>, and a device
+    elsewhere in the name, as a word of its own (between . _ - or the ends),
+    moves to the end (x_<device>-y becomes warped.x-y.<device>)."""
+    n = re.sub(r"^warped[.-]", "", stem(carrier))
+    d = re.escape(device)
+    while True:
+        m = re.fullmatch(rf"(.*)([._-]){d}([._-].*)", n)
+        if not m:
+            break
+        n = m.group(1) + m.group(3)
+    m = re.fullmatch(rf"{d}[._-](.*)", n)
+    if m:
+        n = m.group(1)
+    if not re.search(rf"(^|[._-]){d}$", n):
+        n += f".{device}"
+    return WARPED + n
+
+
+def warp_alone(device: str) -> str:
+    """The name of the device's WARP-only tunnel."""
+    return f"warp.{device}"
+
+
+def sweep_owned(name: str, device: str) -> bool:
+    """The sweep writes these config/ names; wireguard-tools never does (it
+    names its files <server>.<config>) and leaves warped.* alone."""
+    return is_warped(name) or name == warp_alone(device)
 
 
 def warp_endpoint(device_dir: str) -> str:
@@ -116,36 +173,18 @@ def warp_endpoint(device_dir: str) -> str:
     return WARP_ENDPOINT
 
 
-def warped_name(carrier: str, device: str) -> str:
-    """The tunnel a carrier becomes, the device always last: x.conf,
-    warped.x.conf and warped-x.conf all become warped.x.<device>, and a device
-    elsewhere in the name, as a word of its own (between . _ - or the ends),
-    moves to the end (x_<device>-y becomes warped.x-y.<device>)."""
-    n = re.sub(r"^warped[.-]", "", os.path.basename(carrier)[: -len(".conf")])
-    d = re.escape(device)
-    while True:
-        m = re.fullmatch(rf"(.*)([._-]){d}([._-].*)", n)
-        if not m:
-            break
-        n = m.group(1) + m.group(3)
-    m = re.fullmatch(rf"{d}[._-](.*)", n)
-    if m:
-        n = m.group(1)
-    if not re.search(rf"(^|[._-]){d}$", n):
-        n += f".{device}"
-    return f"warped.{n}"
+def warp_net(endpoint: str) -> str:
+    """The route to a WARP endpoint (host:port): what a carrier carries."""
+    return endpoint.rsplit(":", 1)[0] + "/32"
 
 
-def warp_alone(device: str) -> str:
-    """The name of the device's WARP-only tunnel."""
-    return f"warp.{device}"
+def inner_mtu(carrier_mtu: int, warp_mtu: int = WARP_MTU) -> int:
+    """WARP's MTU inside a carrier: its own, lowered when the carrier can't
+    fit that plus what it adds to each packet. (tunnel.sh has its own copy.)"""
+    return min(warp_mtu, carrier_mtu - WARP_OVERHEAD)
 
 
-def sweep_owned(name: str, device: str) -> bool:
-    """The sweep writes these config/ names; wireguard-tools never does (it
-    names its files <server>.<config>) and leaves warped.* alone."""
-    return name.startswith("warped.") or name == warp_alone(device)
-
+# --- writing ---
 
 def state_of(path: str, text: str) -> str:
     """What writing text to path would be: new, updated or unchanged."""
@@ -160,7 +199,7 @@ def write_private(path: str, text: str) -> None:
     (mkstemp makes it 0600), then a rename; never a half-written file."""
     fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".")
     try:
-        with os.fdopen(fd, "w", newline="") as f:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
             f.write(text)
         os.replace(tmp, path)
     except BaseException:
@@ -168,30 +207,65 @@ def write_private(path: str, text: str) -> None:
         raise
 
 
-def private_dir(path: str) -> None:
+def update_private(path: str, text: str) -> str:
+    """write_private, only when it would change anything: new, updated or unchanged."""
+    state = state_of(path, text)
+    if state != "unchanged":
+        write_private(path, text)
+    return state
+
+
+def private_dir(path: str) -> bool:
+    """Make path a 0700 folder; whether that changed anything."""
+    if os.path.isdir(path) and stat.S_IMODE(os.stat(path).st_mode) == 0o700:
+        return False
     os.makedirs(path, exist_ok=True)
     os.chmod(path, 0o700)
+    return True
 
 
+# --- the device's WARP account ---
 
-def readable(paths: List[str]) -> List[Conf]:
-    """Another device's configs, less any it can't read: that device's own
-    sweep, build and check say so, not this one's."""
-    out = []
-    for p in paths:
-        with contextlib.suppress(*FAILURES):
-            out.append(Conf.read(p))
-    return out
+def wgcf(folder: str, *args: str) -> None:
+    """wgcf, its chatter (a device table) shown only if it fails."""
+    if not shutil.which("wgcf"):
+        raise Error("wgcf missing (install.sh --sing-box, or brew install wgcf)")
+    run = subprocess.run(["wgcf", *args], cwd=folder, capture_output=True, text=True)
+    if run.returncode != 0:
+        print(run.stdout + run.stderr, file=sys.stderr, end="")
+        raise Error(f"wgcf {args[0]} failed")
 
 
-def check_keys(device: str, used: List[Conf], note: Callable[[str], None]) -> None:
-    """No private key on two devices (two devices on one key knock each other
-    off), wherever they run it. Names the files, never the key. Not Nord's
-    ("# source: nord"): Nord gives one key per account, so nord.sh keeps each
-    on its own server instead. A key used twice on one device only gets a
-    note: a device runs one tunnel (one profile) at a time, and sing-box
-    groups have no keepalives."""
-    def keyed(confs: List[Conf]) -> List[tuple]:
+def warp_account(f: Folder) -> Tuple[bool, bool, List[str]]:
+    """The device's own WARP account and profile in warp/, made if missing
+    (every device has its own: one account on two devices knocks both off).
+    Returns (registered now, profile generated now, files tightened to 0600)."""
+    private_dir(f.warp)
+    registered = not os.path.isfile(f.account)
+    if registered:
+        wgcf(f.warp, "register", "--accept-tos")
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(f.profile)            # one left from an earlier account
+    generated = not os.path.isfile(f.profile)
+    if generated:
+        wgcf(f.warp, "generate")
+    # The account (its API token) and the profile (its private key): owner only, whatever wgcf wrote them as
+    tightened = [p for p in (f.account, f.profile) if stat.S_IMODE(os.stat(p).st_mode) != 0o600]
+    for p in tightened:
+        os.chmod(p, 0o600)
+    return registered, generated, tightened
+
+
+# --- keys ---
+
+def key_clashes(device: str, used: List[Conf]) -> Tuple[str, str]:
+    """(an error, a note), each "" for none. No private key on two devices
+    (two devices on one key knock each other off), wherever they run it: the
+    error names the files, never the key. Not Nord's ("# source: nord"): Nord
+    gives one key per account, so nord.sh keeps each on its own server
+    instead. A key used twice on one device only gets a note: a device runs
+    one tunnel (one profile) at a time, and sing-box groups have no keepalives."""
+    def keyed(confs: Iterable[Conf]) -> List[Tuple[str, str]]:
         return [(c.value("PrivateKey"), os.path.relpath(c.path, devices_dir())) for c in confs
                 if c.value("PrivateKey") and not any(ln.startswith("# source: nord") for ln in c.lines)]
 
@@ -202,15 +276,18 @@ def check_keys(device: str, used: List[Conf], note: Callable[[str], None]) -> No
             same_device.append(f"  {mine[key]} and {label}")
         else:
             mine[key] = label
-    others = []
-    for name in all_devices():
-        if name == device:
-            continue
-        f = Folder.of(name)
-        paths = files_in(f.carriers) + files_in(f.config) + ([f.profile] if os.path.isfile(f.profile) else [])
-        others += [f"  {mine[k]} and {label}" for k, label in keyed(readable(paths)) if k in mine]
-    if others:
-        raise Error("same private key in:\n" + "\n".join(others)
-                    + "\neach config needs its own (make a new one for this device)")
-    if same_device:
-        note("note: same private key in (fine on one device: one tunnel at a time):\n" + "\n".join(same_device))
+    others = [f"  {mine[k]} and {label}" for name in all_devices() if name != device
+              for k, label in keyed(_readable(Folder.of(name).confs())) if k in mine]
+    error = ("same private key in:\n" + "\n".join(others)
+             + "\neach config needs its own (make a new one for this device)") if others else ""
+    note = ("note: same private key in (fine on one device: one tunnel at a time):\n"
+            + "\n".join(same_device)) if same_device else ""
+    return error, note
+
+
+def _readable(paths: List[str]) -> Iterable[Conf]:
+    """Another device's configs, less any it can't read: that device's own
+    sweep, build and check say so, not this one's."""
+    for p in paths:
+        with contextlib.suppress(*FAILURES):
+            yield Conf.read(p)

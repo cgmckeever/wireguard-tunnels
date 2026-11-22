@@ -43,7 +43,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
@@ -57,6 +56,8 @@ from .store import Error
 
 PROG = "singbox.sh"
 HERE = os.path.join(store.SCRIPTS, "singbox.sh")
+USAGE = "usage: singbox.sh new <device> | build <device> | list (singbox.sh -h)"
+KEEPALIVE = "persistent_keepalive_interval"     # a peer's keepalive in sing-box's JSON
 Say = Callable[[str, bool], None]      # say(text, to_stderr)
 
 
@@ -91,7 +92,7 @@ def endpoint(c: Conf, tag: str, mtu: int, detour: str = "") -> dict:
     if c.value("PresharedKey"):
         peer["pre_shared_key"] = c.value("PresharedKey")
     if c.keepalive():
-        peer["persistent_keepalive_interval"] = c.keepalive()
+        peer[KEEPALIVE] = c.keepalive()
     ep["peers"] = [peer]
     return ep
 
@@ -130,8 +131,7 @@ def group_profile(units: List[Unit]) -> str:
     traffic (and warped ones, sharing the device's WARP key, would knock each
     other off). The tun's MTU is the smallest, so a packet fits whichever
     tunnel is picked. A network two carriers' extras claim goes to the first."""
-    endpoints = [{**ep, "peers": [{k: v for k, v in p.items() if k != "persistent_keepalive_interval"}
-                                  for p in ep["peers"]]}
+    endpoints = [{**ep, "peers": [{k: v for k, v in p.items() if k != KEEPALIVE} for p in ep["peers"]]}
                  for u in units for ep in u.endpoints]
     rules, seen = [], set()
     for r in (r for u in units for r in u.rules):
@@ -157,7 +157,7 @@ class Device(store.Folder):
     def __init__(self, name: str, verb: str) -> None:
         if not name:
             raise Error(f"a device name, please (singbox.sh {verb} <device>)")
-        if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", name):
+        if not store.valid_device(name):
             raise Error("device names are letters, digits, . _ - (not starting with .)")
         super().__init__(store.device_dir(name))
         self.setup = "install.sh" if name == store.this_mac() else f"{HERE} new {name}"
@@ -174,14 +174,14 @@ def units(dev: Device, swept: sweep.Sweep, say: Say) -> List[Unit]:
     warp = next((c for c in configs if c.name == store.warp_alone(dev.name) and c.name in usable), None)
     out: List[Unit] = []
     seen_cidrs: set = set()
-    for c in [c for c in configs if c.name.startswith("warped.")] + \
+    for c in [c for c in configs if store.is_warped(c.name)] + \
              [c for c in configs if not store.sweep_owned(c.name, dev.name)]:
         why = c.problem()
         if why:
             say(f"skipped {c.name}: {why}", False)
             continue
         mtu = c.mtu(store.PLAIN_MTU)
-        if not c.name.startswith("warped."):
+        if not store.is_warped(c.name):
             out.append(plain(c, mtu, say))
         elif warp is None:
             say(f"skipped {c.name}: no WARP profile", False)
@@ -213,9 +213,9 @@ def warped(c: Conf, mtu: int, warp: Conf, seen_cidrs: set, say: Say) -> Unit:
     tunnel-routes) need a rule: AllowedIPs doesn't route in sing-box, so
     without one they'd go into WARP. WARP runs at its own MTU (1280 from
     wgcf), lowered when the carrier can't fit that plus its 80 bytes."""
-    carrier = "carrier." + c.name[len("warped."):]
+    carrier = "carrier." + c.name[len(store.WARPED):]
     wmtu = store.inner_mtu(mtu, warp.mtu(store.WARP_MTU))
-    warp_net = f"{warp.endpoint()[0]}/32"
+    warp_net = store.warp_net(warp.value("Endpoint"))
     own = store.collated({cidr for cidr in c.items("AllowedIPs") if cidr != warp_net})
     for cidr in own:
         if cidr in seen_cidrs:
@@ -250,7 +250,11 @@ def plan(dev: Device, swept: sweep.Sweep, say: Say) -> Dict[str, str]:
     made = units(dev, swept, say)
     if not [u for u in made if u.tag != store.warp_alone(dev.name)]:
         raise Error(f"nothing to build: put configs in {dev.carriers} or {dev.config}")
-    store.check_keys(dev.name, [u.conf for u in made], lambda text: say(text, True))
+    error, note = store.key_clashes(dev.name, [u.conf for u in made])
+    if error:
+        raise Error(error)
+    if note:
+        say(note, True)
     check_tags(dev, made)
     files = {f"{u.tag}.json": single_profile(u) for u in made}
     files[f"{dev.name}.json"] = group_profile(made)
@@ -264,9 +268,10 @@ def plan(dev: Device, swept: sweep.Sweep, say: Say) -> Dict[str, str]:
 
 
 def sweep_for(dev: Device) -> sweep.Sweep:
+    """The device's sweep; its own failure said as the sweep says it."""
     try:
         return sweep.Sweep(dev.dir, app_column=False)
-    except Error as e:
+    except store.FAILURES as e:
         print(f"{sweep.PROG}: {e}", file=sys.stderr)
         raise Error("sweep failed") from None
 
@@ -293,11 +298,7 @@ def cmd_build(name: str) -> None:
     print(f"== Profiles in {out}")
     checked = sing_box_check(files)
     for f, text in files.items():
-        path = os.path.join(out, f)
-        state = store.state_of(path, text)
-        if state != "unchanged":
-            store.write_private(path, text)
-        print(f"{f:<48} {state}")
+        print(f"{f:<48} {store.update_private(os.path.join(out, f), text)}")
     for path in store.files_in(out, ".json"):
         f = os.path.basename(path)
         if f not in files:
@@ -335,35 +336,14 @@ def sing_box_check(files: Dict[str, str]) -> bool:
 
 # --- new, list ---
 
-def wgcf(folder: str, *args: str) -> None:
-    """wgcf, its chatter (a device table) shown only if it fails."""
-    if not shutil.which("wgcf"):
-        raise Error("wgcf missing (install.sh --sing-box, or brew install wgcf)")
-    run = subprocess.run(["wgcf", *args], cwd=folder, capture_output=True, text=True)
-    if run.returncode != 0:
-        print(run.stdout + run.stderr, file=sys.stderr, end="")
-        raise Error(f"wgcf {args[0]} failed")
-
-
 def cmd_new(name: str) -> None:
     dev = Device(name, "new")
-    for d in (store.root(), store.devices_dir(), dev.dir, dev.carriers, dev.warp, dev.config):
+    for d in (store.root(), store.devices_dir(), dev.dir, dev.carriers, dev.config):
         store.private_dir(d)
-    account = os.path.join(dev.warp, "wgcf-account.toml")
-    if os.path.isfile(account):
-        print("WARP account: already there")
-    else:
-        wgcf(dev.warp, "register", "--accept-tos")
-        if os.path.exists(dev.profile):
-            os.remove(dev.profile)          # one left from an earlier account
-        print("WARP account: registered")
-    os.chmod(account, 0o600)
-    if not os.path.isfile(dev.profile):
-        wgcf(dev.warp, "generate")
-    os.chmod(dev.profile, 0o600)
+    registered, _, _ = store.warp_account(dev)
+    print(f"WARP account: {'registered' if registered else 'already there'}")
     # config/warp.<device>.conf (WARP alone, for the WireGuard app) now, for a device that never runs build
-    with open(os.devnull, "w") as quiet:
-        sweep_for(dev).run(out=quiet)
+    sweep_for(dev).write()
     print(f"WireGuard app config: {dev.config}/{store.warp_alone(name)}.conf (WARP alone)\n")
     print(f"Next: put this device's carriers in {dev.carriers}/ and its plain tunnels\n"
           f"      in {dev.config}/ (new WireGuard configs made for this device)\n"
@@ -387,21 +367,24 @@ def cmd_list() -> None:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    os.umask(0o077)
-    verb = args[0] if args else ""
-    try:
-        if verb == "new":
-            cmd_new(args[1] if len(args) > 1 else "")
-        elif verb == "build":
-            cmd_build(args[1] if len(args) > 1 else "")
-        elif verb == "list":
-            cmd_list()
-        else:
+
+    def body() -> int:
+        verb, rest = (args[0], args[1:]) if args else ("", [])
+        if verb in ("-h", "--help"):
             print(__doc__, end="")
-            return 0 if verb in ("-h", "--help") else 1
-    except store.FAILURES as e:
-        store.die(PROG, str(e))
-    return 0
+            return 0
+        if verb in ("new", "build") and len(rest) <= 1:
+            (cmd_new if verb == "new" else cmd_build)(rest[0] if rest else "")
+        elif verb == "list" and not rest:
+            cmd_list()
+        elif not verb:
+            print(__doc__, end="")
+            return 1
+        else:
+            raise Error(USAGE)
+        return 0
+
+    return store.run_main(PROG, body)
 
 
 if __name__ == "__main__":

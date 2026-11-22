@@ -53,7 +53,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, TextIO
 
 from . import store
-from .conf import Conf
+from .conf import Conf, stem
 from .store import KEEPALIVE, Error
 
 PROG = "wgwarp-sweep.sh"
@@ -67,7 +67,8 @@ class Row:
     state: str                  # new, updated, unchanged, skipped, manual or orphan
     path: str = ""              # its config/ file
     text: str = ""              # what the sweep writes there ("" for none)
-    detail: str = ""
+    detail: str = ""            # the table's last column, when it's fixed
+    source: str = ""            # the carrier or profile it's made from
     notes: List[str] = field(default_factory=list)
 
 
@@ -104,7 +105,7 @@ def verdict(e: str) -> str:
     return "bad" if bits > most else "wide" if bits < least else "kept"
 
 
-def carrier_notes(carrier: Conf, found: Dict[str, List[str]]) -> List[str]:
+def carrier_notes(carrier: Conf, found: Dict[str, List[str]], warp_mtu: int) -> List[str]:
     """What the table says under a carrier: its extras, and a small MTU."""
     notes = [say.format(", ".join(found[v])) for v, say in (
         ("kept", "also carries {}"),
@@ -112,9 +113,10 @@ def carrier_notes(carrier: Conf, found: Dict[str, List[str]]) -> List[str]:
         ("bad", "ignored, not an address: {}")) if found[v]]
     # WARP needs 1280 inside (IPv6's minimum): a carrier too small for that
     # plus its overhead makes tunnel.sh and singbox.sh run WARP smaller
-    mtu = carrier.value("MTU")
-    if mtu.isdigit() and store.inner_mtu(int(mtu)) < store.WARP_MTU:
-        notes.append(f"carrier MTU {mtu}: WARP runs at {store.inner_mtu(int(mtu))} inside (IPv6 and QUIC fall back)")
+    mtu = carrier.number("MTU", 0)
+    inner = store.inner_mtu(mtu, warp_mtu)
+    if mtu and inner < warp_mtu:
+        notes.append(f"carrier MTU {mtu}: WARP runs at {inner} inside (IPv6 and QUIC fall back)")
     return notes
 
 
@@ -174,6 +176,9 @@ def resolve(arg: str) -> str:
 
 
 class Sweep:
+    """The sweep of one folder: planned when made (plan changes nothing),
+    then write() and report() (run() is both)."""
+
     def __init__(self, folder: str, app_column: bool = True) -> None:
         self.f = store.Folder(folder)
         # Only a device folder gets swept: never make config/ in some other
@@ -191,47 +196,47 @@ class Sweep:
         """Every row of the table, with what to write; changes nothing."""
         rows: List[Row] = []
         claimed = set()
-        warp_net = self.endpoint.rsplit(":", 1)[0] + "/32"
+        profile = Conf.read(self.f.profile) if os.path.isfile(self.f.profile) else None
+        warp_mtu = profile.mtu(store.WARP_MTU) if profile else store.WARP_MTU
         for path in store.files_in(self.f.carriers):
             name = store.warped_name(path, self.f.name)
             carrier = Conf.read(path)
-            why = carrier.problem()       # first: a broken carrier doesn't take the name from a good one
+            # The carrier's own problem first: a broken one doesn't take the name from a good one
+            why = carrier.problem() or (f"another carrier already makes {name}" if name in claimed else "")
             if why:
-                rows.append(Row(name, "skipped", detail=f"{os.path.basename(path)}: {why}"))
-                continue
-            if name in claimed:
-                why = f"another carrier already makes {name}"
-                rows.append(Row(name, "skipped", detail=f"{os.path.basename(path)}: {why}"))
+                rows.append(Row(name, "skipped", detail=f"{os.path.basename(path)}: {why}", source=path))
                 continue
             claimed.add(name)
             found = extras(carrier)
-            text = render_warped(carrier, warp_net, found["kept"])
-            rows.append(self.output(name, text, carrier_notes(carrier, found)))
-        if os.path.isfile(self.f.profile):
+            rows.append(self.output(name, render_warped(carrier, store.warp_net(self.endpoint), found["kept"]),
+                                    path, notes=carrier_notes(carrier, found, warp_mtu)))
+        if profile:
             name = store.warp_alone(self.f.name)
             claimed.add(name)
-            profile = Conf.read(self.f.profile)
             why = profile.problem()
-            if why:
-                rows.append(Row(name, "skipped", detail=f"warp/wgcf-profile.conf: {why}"))
-            else:
-                row = self.output(name, render_warp_alone(profile, self.endpoint), [])
-                row.detail = "(WARP alone, a plain tunnel)"
-                rows.append(row)
+            rows.append(Row(name, "skipped", detail=f"warp/wgcf-profile.conf: {why}", source=self.f.profile) if why
+                        else self.output(name, render_warp_alone(profile, self.endpoint), self.f.profile,
+                                         detail="(WARP alone, a plain tunnel)"))
         # config/ files no carrier claims: a warped one lost its carrier (an
         # orphan: reported, never deleted); anything else is someone else's
         for path in store.files_in(self.f.config):
-            name = os.path.basename(path)[: -len(".conf")]
+            name = stem(path)
             if name not in claimed:
                 rows.append(Row(name, "orphan" if store.sweep_owned(name, self.f.name) else "manual", path=path))
         return rows
 
-    def output(self, name: str, text: str, notes: List[str]) -> Row:
+    def output(self, name: str, text: str, source: str, detail: str = "", notes: Optional[List[str]] = None) -> Row:
         path = os.path.join(self.f.config, f"{name}.conf")
-        return Row(name, store.state_of(path, text), path=path, text=text, notes=notes)
+        return Row(name, store.state_of(path, text), path=path, text=text, detail=detail, source=source,
+                   notes=notes or [])
 
     def written(self) -> List[Row]:
         return [r for r in self.rows if r.text]
+
+    def orphan_reason(self, r: Row) -> str:
+        """Why an orphan has nothing to come from."""
+        return "no warp/wgcf-profile.conf" if r.name == store.warp_alone(self.f.name) \
+            else "no usable carrier in carriers/"
 
     def configs(self) -> List[Conf]:
         """config/ as it is once the sweep has run (read now, or as it will be)."""
@@ -239,15 +244,19 @@ class Sweep:
         paths = store.collated(set(store.files_in(self.f.config)) | set(planned))
         return [Conf(planned[p], p) if p in planned else Conf.read(p) for p in paths]
 
-    def run(self, no_next: bool = False, out: Optional[TextIO] = None) -> None:
-        out = out or sys.stdout
+    def write(self) -> None:
+        """What changed into config/ (0600), the folders 0700."""
         store.private_dir(self.f.dir)
         store.private_dir(self.f.config)
         if not self.no_carriers:
             os.chmod(self.f.carriers, 0o700)
         for r in self.written():
-            if r.state != "unchanged":
-                store.write_private(r.path, r.text)
+            store.update_private(r.path, r.text)
+
+    def report(self, no_next: bool = False, out: Optional[TextIO] = None) -> None:
+        """The table: each tunnel, what happened to its file, and for this
+        Mac the WireGuard app column."""
+        out = out or sys.stdout
 
         def say(*cols: str) -> None:
             print(f"{cols[0]:<40} {cols[1]:<10} {cols[2] if len(cols) > 2 else ''}", file=out)
@@ -263,9 +272,7 @@ class Sweep:
             if r.detail:
                 say(r.name, r.state, r.detail)
             elif r.state == "orphan":
-                gone = "warp/wgcf-profile.conf" if r.name == store.warp_alone(self.f.name) \
-                    else "usable carrier in carriers/"
-                say(r.name, r.state, f"(no {gone}: left in place)")
+                say(r.name, r.state, f"({self.orphan_reason(r)}: left in place)")
             else:
                 say(r.name, r.state, self.app_action(r))
             for n in r.notes:
@@ -276,6 +283,10 @@ class Sweep:
         if not no_next:
             print(f"Next: tunnel.sh import   (installs everything in {self.f.config} for the daemon)", file=out)
         print("The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise.", file=out)
+
+    def run(self, no_next: bool = False) -> None:
+        self.write()
+        self.report(no_next)
 
     def app_action(self, r: Row) -> str:
         """What to do about the WireGuard app's copy of a tunnel (only if you
@@ -311,19 +322,17 @@ def command(argv: List[str]) -> str:
 
 def main(argv: Optional[List[str]] = None) -> int:
     args = sys.argv[1:] if argv is None else argv
-    os.umask(0o077)
-    if len(args) > 1:
-        store.die(PROG, USAGE)
-    if args and args[0] in ("-h", "--help"):
-        print(__doc__, end="")
-        return 0
-    if args and args[0].startswith("-"):
-        store.die(PROG, USAGE)
-    try:
+
+    def body() -> int:
+        if args[:1] in (["-h"], ["--help"]):
+            print(__doc__, end="")
+            return 0
+        if len(args) > 1 or (args and args[0].startswith("-")):
+            raise Error(USAGE)
         Sweep(resolve(args[0] if args else "")).run(no_next=bool(os.environ.get("SWEEP_NO_NEXT")))
-    except store.FAILURES as e:
-        store.die(PROG, str(e))
-    return 0
+        return 0
+
+    return store.run_main(PROG, body)
 
 
 if __name__ == "__main__":

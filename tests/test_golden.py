@@ -28,7 +28,7 @@ GOLDEN = os.path.join(os.path.dirname(__file__), "golden")
 
 
 def read(path: str, mode: str = "r"):
-    with open(path, mode) as f:
+    with open(path, mode, **({} if "b" in mode else {"encoding": "utf-8"})) as f:
         return f.read()
 
 

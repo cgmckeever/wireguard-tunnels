@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
-from typing import Iterator, Optional
+from typing import Iterator, Optional, Union
 
 import pytest
 
@@ -47,16 +47,17 @@ class Store:
     def path(self, rel: str) -> str:
         return os.path.join(self.root, rel)
 
-    def put(self, rel: str, text: str, mode: int = 0o600) -> str:
+    def put(self, rel: str, text: Union[str, bytes], mode: int = 0o600) -> str:
+        """A file (text as UTF-8, or bytes as they are), its folders 0700."""
         p = self.path(rel)
         os.makedirs(os.path.dirname(p), mode=0o700, exist_ok=True)
-        with open(p, "w") as f:
-            f.write(text)
+        with open(p, "wb") as f:
+            f.write(text.encode() if isinstance(text, str) else text)
         os.chmod(p, mode)
         return p
 
     def read(self, rel: str) -> str:
-        with open(self.path(rel)) as f:
+        with open(self.path(rel), encoding="utf-8") as f:
             return f.read()
 
     def device(self, name: str, *, carriers: bool = True, warp: bool = True) -> str:
@@ -70,10 +71,31 @@ class Store:
 
 
 @pytest.fixture
-def store(tmp_path, monkeypatch) -> Iterator[Store]:
+def tmp_store(tmp_path, monkeypatch) -> Iterator[Store]:
     root = str(tmp_path / "wg-tunnels")
     os.makedirs(os.path.join(root, "devices"), mode=0o700)
     monkeypatch.setenv("WG_TUNNELS", root)
     old = os.umask(0o077)       # as the scripts' main()s set it
     yield Store(root)
     os.umask(old)
+
+
+def fake_command(tmp_path, monkeypatch, name: str, script: str) -> None:
+    """A stand-in for a program (wgcf, sing-box) on PATH: a bash script."""
+    bindir = tmp_path / "bin"
+    bindir.mkdir(exist_ok=True)
+    path = bindir / name
+    path.write_text("#!/bin/bash\n" + script + "\n")
+    path.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{bindir}{os.pathsep}{os.environ['PATH']}")
+
+
+@pytest.fixture
+def fake_wgcf(tmp_path, monkeypatch) -> None:
+    """wgcf that registers and generates as the real one does: files in the current folder."""
+    profile = wgcf("fake").replace("\n", "\\n")
+    fake_command(tmp_path, monkeypatch, "wgcf", f"""case "$1" in
+    register) echo 'access_token = "t"' > wgcf-account.toml; chmod 644 wgcf-account.toml ;;
+    generate) printf '{profile}' > wgcf-profile.conf; chmod 644 wgcf-profile.conf ;;
+    *) exit 1 ;;
+esac""")

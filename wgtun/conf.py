@@ -15,7 +15,7 @@ class Error(Exception):
 class Conf:
     def __init__(self, text: str, path: str = "") -> None:
         self.path = path
-        self.name = os.path.basename(path)[: -len(".conf")] if path.endswith(".conf") else os.path.basename(path)
+        self.name = stem(path)
         lines = text.split("\n")
         if lines and lines[-1] == "":
             lines.pop()
@@ -37,14 +37,17 @@ class Conf:
         """Every comma-separated entry of every <key> line (Address, AllowedIPs)."""
         return [e.strip() for v in self.values(key) for e in v.split(",") if e.strip()]
 
+    def number(self, key: str, default: int) -> int:
+        """<key> as a whole number, or default when it's missing or isn't one."""
+        v = self.value(key)
+        return int(v) if v.isdigit() else default
+
     def keepalive(self) -> int:
-        """PersistentKeepalive in seconds, 0 for none (or not a number)."""
-        ka = self.value("PersistentKeepalive")
-        return int(ka) if ka.isdigit() else 0
+        """PersistentKeepalive in seconds, 0 for none (or off)."""
+        return self.number("PersistentKeepalive", 0)
 
     def mtu(self, default: int) -> int:
-        mtu = self.value("MTU")
-        return int(mtu) if mtu.isdigit() else default
+        return self.number("MTU", default)
 
     def endpoint(self) -> tuple[str, int]:
         """(host, port), brackets taken off an IPv6 host."""
@@ -63,9 +66,10 @@ class Conf:
                 return f"no {key}"
         if not self.items("Address"):
             return "no Address"
-        if not re.search(r":[0-9]+$", self.value("Endpoint")):
+        if not re.fullmatch(r".+:[0-9]+", self.value("Endpoint")):
             return "Endpoint isn't host:port"
-        if self.value("MTU") and not self.value("MTU").isdigit():
+        mtu = self.value("MTU")
+        if mtu and not mtu.isdigit():
             return "MTU isn't a number"
         return ""
 
@@ -79,10 +83,17 @@ class Conf:
         return "".join(ln + "\n" for ln in out)
 
 
+def stem(path: str) -> str:
+    """A config's name: its file name without .conf."""
+    name = os.path.basename(path)
+    return name[: -len(".conf")] if name.endswith(".conf") else name
+
+
 def read_text(path: str) -> str:
-    """A file as text, line ends as they are; one that isn't UTF-8 is an Error naming it."""
+    """A file as UTF-8 text, line ends as they are; one that isn't UTF-8 is an
+    Error naming it (whatever the locale's encoding)."""
     try:
-        with open(path, newline="") as f:
+        with open(path, encoding="utf-8", newline="") as f:
             return f.read()
     except UnicodeDecodeError:
         raise Error(f"{path}: not UTF-8 text") from None
@@ -90,4 +101,3 @@ def read_text(path: str) -> str:
 
 def is_key(line: str, key: str) -> bool:
     return re.match(rf"\s*{key}\s*=", line, re.I) is not None
-
