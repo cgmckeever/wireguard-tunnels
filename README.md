@@ -934,7 +934,10 @@ compares their plans with the disk.
 fake keys); `./test.sh lint` runs ruff and mypy, and `bash -n` (plus
 shellcheck, if it's installed) on every shell script; `./test.sh all` both. The
 first run makes `.venv/` with pytest, ruff and mypy, on macOS's Python 3.9
-when it's there (the oldest the scripts must run on).
+when it's there (the oldest the scripts must run on). `./test.sh hooks` has git
+run `./test.sh all` before each commit (`.githooks/pre-commit`), and GitHub
+Actions runs it on every push (`.github/workflows/tests.yml`, on macOS).
+`CLAUDE.md` says how to change things without tangling them.
 
 - `tests/golden/` pins the output of the shell scripts these replaced: the
   store `edge_store.py` makes, and every file, mode and line they printed

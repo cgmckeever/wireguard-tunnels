@@ -1,0 +1,16 @@
+#!/bin/bash
+# pre-commit — ./test.sh all (tests, lint, bash -n, every command a script
+# runs exists) before each commit; the output only when something fails.
+# Set up once per clone: ./test.sh hooks. Skip once: git commit --no-verify.
+# It tests the working tree, not just what's staged: commit what you tested.
+cd "$(git rev-parse --show-toplevel)" || exit 1
+log=$(mktemp "${TMPDIR:-/tmp}/wgtun-pre-commit.XXXXXX") || exit 1
+if ./test.sh all > "$log" 2>&1; then
+    echo "pre-commit: ./test.sh all passed ($(grep -Eo '[0-9]+ passed' "$log" | tail -1))" >&2
+    rm -f "$log"
+else
+    cat "$log" >&2
+    echo "pre-commit: ./test.sh all failed, nothing committed (fix it, or git commit --no-verify)" >&2
+    rm -f "$log"
+    exit 1
+fi

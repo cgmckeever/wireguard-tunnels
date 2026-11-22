@@ -5,7 +5,8 @@
 #   ./test.sh            the tests (any pytest option works: ./test.sh -k keepalive)
 #   ./test.sh lint       ruff and mypy (settings in pyproject.toml), bash -n on every
 #                        shell script (and shellcheck, when it's installed)
-#   ./test.sh all        lint, then the tests
+#   ./test.sh all        lint, then the tests (the pre-commit hook and CI run this)
+#   ./test.sh hooks      have git run ./test.sh all before each commit (.githooks/)
 set -euo pipefail
 cd "$(dirname "$0")"
 RUFF=$(sed -n 's/^required-version = "==\([^"]*\)".*/\1/p' pyproject.toml)   # pinned there, as in wireguard-tools
@@ -22,11 +23,12 @@ lint() {
     .venv/bin/ruff check wgtun tests
     .venv/bin/mypy
     # macOS's own bash (3.2) runs the #!/bin/bash scripts
-    local f shells=(install.sh test.sh scripts/*.sh scripts/swiftbar/*.sh)
+    local f shells=(install.sh test.sh .githooks/pre-commit scripts/*.sh scripts/swiftbar/*.sh)
     for f in "${shells[@]}"; do /bin/bash -n "$f" || return 1; done
     if command -v shellcheck >/dev/null; then shellcheck -S warning "${shells[@]}"; fi
 }
 case "${1:-}" in
+    hooks) git config core.hooksPath .githooks && echo "git runs .githooks/pre-commit (./test.sh all) before each commit" ;;
     lint) lint ;;
     all)  shift; lint; exec .venv/bin/python -m pytest -q tests "$@" ;;
     *)    exec .venv/bin/python -m pytest -q tests "$@" ;;

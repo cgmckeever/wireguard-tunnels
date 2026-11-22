@@ -1,0 +1,10 @@
+# The same checks as the pre-commit hook: ./test.sh all. On macOS, as the
+# scripts are: /bin/bash 3.2, /usr/bin/python3 3.9, macOS's own tools.
+name: tests
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./test.sh all
