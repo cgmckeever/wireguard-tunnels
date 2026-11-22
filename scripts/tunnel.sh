@@ -24,7 +24,7 @@
 #   tunnel.sh extract-import [zip]
 #                           Both: extract, then import
 #   tunnel.sh update        Update the daemon from this copy, only if it differs
-#                           (up, down and import do this too)
+#                           (every command that asks the daemon does this too)
 #   tunnel.sh install       Install /usr/local/sbin/wg-tunnels and its LaunchDaemon
 #   tunnel.sh uninstall     Take everything down, remove both (configs are kept)
 #   tunnel.sh rotate-warp   New Cloudflare WARP keys: registers a new account
@@ -104,7 +104,7 @@ WATCH_SECS=30
 NET_SECS=5      # how often to look for a network change (cheap: no wg calls)
 STALE_SECS=180
 PROBE_IP=1.1.1.1  # answers ping through WARP; for fit_path_mtu
-MTU_EVERY=10      # WARP alone: measure again every 10 watchdog runs (5 min)
+MTU_EVERY=10      # WARP alone: measure again every 10 watchdog runs (about 5 min)
 MTU_TICK=0
 V4_HALVES="0.0.0.0/1 128.0.0.0/1"
 V6_HALVES="::/1 8000::/1"
@@ -188,7 +188,7 @@ mac_dir() {
 put() {
     local tmp
     tmp=$(mktemp "$1.XXXXXX") || return 1
-    printf '%s\n' "$2" > "$tmp" && chmod "${3:-644}" "$tmp" && mv -f "$tmp" "$1"
+    { printf '%s\n' "$2" > "$tmp" && chmod "${3:-644}" "$tmp" && mv -f "$tmp" "$1"; } || { rm -f "$tmp"; return 1; }
 }
 
 # conf_vals <file> <key>: every value of key (any case), everything after
@@ -285,10 +285,13 @@ kind_of() {
 # one arrives as the sweep wrote it: swept_ok checked it)
 #   full:   Table = off (the daemon does the routes), DNS kept
 #   warped, split: as is
-#   all:    Endpoint host resolved to the IP (DNS can be cut off while switching)
+#   all:    Endpoint host resolved to the IP (DNS can be cut off while switching);
+#           no PreUp/PostUp/PreDown/PostDown: they'd run as root, from a file
+#           any user process of yours can edit
 render() {
     awk -v kind="$2" -v ip="$3" '
         { sub(/\r$/, "") }
+        tolower($0) ~ /^[[:space:]]*(preup|postup|predown|postdown)[[:space:]]*=/ { next }
         /^[[:space:]]*\[Interface\]/ { print; if (kind == "full") print "Table = off"; sec = "i"; next }
         /^[[:space:]]*\[Peer\]/      { print; sec = "p"; next }
         sec == "i" && /^[[:space:]]*Table[[:space:]]*=/ && kind == "full" { next }
@@ -301,16 +304,22 @@ render() {
     ' "$1"
 }
 
-# WARP for wg-quick: no PostUp (the daemon does the routes), keepalive so a
-# stale handshake means trouble rather than idleness
+# add_keepalive: the config on stdin with a keepalive of 25s after its
+# Endpoint (any other keepalive line dropped), so a stale handshake means
+# trouble rather than idleness (the watchdog)
+add_keepalive() {
+    awk '{ l = tolower($0) } l ~ /^[[:space:]]*persistentkeepalive[[:space:]]*=/ { next } { print }
+         l ~ /^[[:space:]]*endpoint[[:space:]]*=/ { print "PersistentKeepalive = 25" }'
+}
+
+# WARP for wg-quick: no PostUp (the daemon does the routes), a keepalive
 render_warp() {
     awk '
         { sub(/\r$/, "") }
-        /^[[:space:]]*(PostUp|PostDown|PreUp|PreDown|Table|PersistentKeepalive)[[:space:]]*=/ { next }
+        /^[[:space:]]*(PostUp|PostDown|PreUp|PreDown|Table)[[:space:]]*=/ { next }
         /^[[:space:]]*\[Interface\]/ { print; print "Table = off"; next }
-        /^[[:space:]]*Endpoint[[:space:]]*=/ { print; print "PersistentKeepalive = 25"; next }
         { print }
-    ' "$1"
+    ' "$1" | add_keepalive
 }
 
 resolve() {
@@ -322,7 +331,7 @@ resolve() {
 # changes nothing; changes prints only what changed (the dry run before it
 # showed the rest)
 cmd_import_root() {
-    local src="$1" dry="${2:-}" changes="${3:-}" f name kind ep host ip iface out tmp state n wep active why rows="" seen="" w same=0
+    local src="$1" dry="${2:-}" changes="${3:-}" f name kind host ip iface out tmp state n wep active want wanted why rows="" seen="" w same=0
     need_root import
     [ -d "$src" ] || die "No folder ${src}"
     if [ -z "$dry" ]; then
@@ -346,6 +355,10 @@ cmd_import_root() {
     state=$(settle "$tmp" "$CONF/warp.conf")
 
     active=$(st name)
+    # The tunnel asked for, up or not yet (a failed up, a pause): kept too, or
+    # its routes would outlive its config
+    read -r want wanted _ 2>/dev/null < "$STATE/desired"
+    case "$want" in up|pause) ;; *) wanted="" ;; esac
     # The name column fits the longest name, new or old
     w=$( { for f in "$src"/*.conf; do basename "$f" .conf; done; cut -f1 "$TSV" 2>/dev/null; } \
         | awk '{ if (length > m) m = length } END { print (m > 28 ? m : 28) }')
@@ -360,6 +373,11 @@ cmd_import_root() {
     for f in "$src"/*.conf; do
         [ -f "$f" ] || continue
         name=$(basename "$f" .conf)
+        # The daemon's state files are space-separated: a name is one word
+        if ! [[ "$name" =~ ^[A-Za-z0-9._=+-]+$ ]]; then
+            row "$name" - - "skipped: the name has a space or other character (rename the file)"
+            continue
+        fi
         if ! grep -qiE '^[[:space:]]*\[Interface\]' "$f" || ! grep -qiE '^[[:space:]]*\[Peer\]' "$f" \
             || [ -z "$(conf_val "$f" PrivateKey)" ] || [ -z "$(conf_val "$f" Endpoint)" ]; then
             row "$name" - - "skipped: not a WireGuard config"
@@ -400,9 +418,7 @@ cmd_import_root() {
         # The sweep's warp.<device>.conf has one already: this is for a folder
         # imported from elsewhere.
         if same_key "$f" "$WARP_SRC" && ! has_keepalive "$tmp"; then
-            awk '{ l = tolower($0) } l ~ /^[[:space:]]*persistentkeepalive[[:space:]]*=/ { next } { print }
-                 l ~ /^[[:space:]]*endpoint[[:space:]]*=/ { print "PersistentKeepalive = 25" }' "$tmp" > "$tmp.ka" \
-                && mv -f "$tmp.ka" "$tmp"
+            add_keepalive < "$tmp" > "$tmp.ka" && mv -f "$tmp.ka" "$tmp"
         fi
         state=$(settle "$tmp" "$out")
         [ "$name" = "$active" ] && [ "$state" = updated ] && state="updated (up now: re-run tunnel.sh up)"
@@ -410,13 +426,13 @@ cmd_import_root() {
         row "$name" "$kind" "$iface" "$state"
     done
 
-    # Tunnels gone from the export: removed, unless up right now
+    # Tunnels gone from the export: removed, unless up or asked for
     while IFS=$'\t' read -r name iface kind ip; do
         [ -n "$name" ] || continue
         printf '%s' "$rows" | awk -F'\t' -v n="$name" '$1 == n {f = 1} END {exit !f}' && continue
-        if [ "$name" = "$active" ]; then
+        if [ "$name" = "$active" ] || [ "$name" = "$wanted" ]; then
             rows+="${name}"$'\t'"${iface}"$'\t'"${kind}"$'\t'"${ip}"$'\n'
-            row "$name" "$kind" "$iface" "kept: up now (tunnel.sh down, then import again)"
+            row "$name" "$kind" "$iface" "kept: in use (tunnel.sh down, then import again)"
         else
             [ -n "$dry" ] || rm -f "$CONF/$iface.conf"
             row "$name" "$kind" "$iface" "removed"
@@ -704,10 +720,10 @@ apply_down() {
 
 apply() {  # apply <request-id> — the desired state; progress ends with ok/fail
     local want name until
+    APPLY_REQ=$(cat "$RUN/request" 2>/dev/null)   # first: a newer request after this cuts it short
     read -r want name until 2>/dev/null < "$STATE/desired"
     put "$RUN/progress" "req $1"
     STALE=0 SUPERSEDED=""
-    APPLY_REQ=$(cat "$RUN/request" 2>/dev/null)
     if [ "$want" = up ]; then
         CONNECTING=1
         if apply_up "$name"; then echo ok >> "$RUN/progress"; else echo fail >> "$RUN/progress"; fi
@@ -857,7 +873,8 @@ cmd_daemon() {
         g=$(cat "$RUN/armed" 2>/dev/null); [ -n "$g" ] && del_routes "$g"
         rm -f "$RUN/armed"
     fi
-    rm -f "$RUN/current" "$RUN"/.wgq.*   # a restart re-applies what's wanted
+    # A restart re-applies what's wanted; temp files of an interrupted run go
+    rm -f "$RUN/current" "$RUN"/.wgq.* "$CONF"/.import.* "$CONF"/.warp.*
     log "daemon start"
     while true; do
         resume_if_due
@@ -960,6 +977,7 @@ cmd_breakglass_root() {
     [ -d "$STATE" ] && put "$STATE/desired" "down" \
         && echo "  wanted: down (a reboot won't bring a tunnel back)"
     launchctl bootout system/"$LABEL" 2>/dev/null && echo "  stopped ${LABEL}"
+    wait_until 10 eval '! loaded'   # bootout returns before it's gone: it could still add routes
 
     echo "== wg-quick"
     # Route monitors first: they put routes and DNS back on every network change
@@ -1044,6 +1062,7 @@ cmd_uninstall_root() {
     put "$STATE/desired" "down" && put "$RUN/request" "uninstall.$$"
     sleep 3
     launchctl bootout system/"$LABEL" 2>/dev/null
+    wait_until 10 eval '! loaded'
     teardown; disarm
     rm -f "$PLIST" "$INSTALLED" "$RUN/status" "$RUN/progress" "$RUN/request"
     echo "Removed ${INSTALLED} and ${PLIST}; configs kept in ${ETC}"
@@ -1187,6 +1206,7 @@ follow() {
     while [ "$i" -lt 120 ]; do
         [ "$(head -1 "$RUN/progress" 2>/dev/null)" = "req $req" ] || { echo "  (superseded by another request)"; return 1; }
         n=$(wc -l < "$RUN/progress")
+        [ "$n" -lt "$seen" ] && seen=1     # a restarted daemon applying it again: from the top
         if [ "$n" -gt "$seen" ]; then
             while IFS= read -r line; do
                 case "$line" in
@@ -1418,42 +1438,44 @@ status() {
 # wireguard-tools issued ("# wireguard-tools client:" line) are left alone:
 # they're wgt-ctl's to replace, and the app's export drops that line.
 cmd_extract() {
-    local zip="${1:-}" tmp f name n=0 dir EXPORTS CONFIGS
+    local zip="${1:-}" tmp f name n=0 rc dir exports configs mark="# wireguard-tools client:"
     dir=$(mac_dir) || exit 1
-    EXPORTS="$dir/exports" CONFIGS="$dir/config"
+    exports="$dir/exports" configs="$dir/config"
     if [ -z "$zip" ]; then
-        zip=$(ls -t "$EXPORTS"/*.zip 2>/dev/null | head -1)
-        [ -n "$zip" ] || die "No zip in ${EXPORTS} — WireGuard app → Export Tunnels to Zip… into ${EXPORTS}"
+        zip=$(ls -t "$exports"/*.zip 2>/dev/null | head -1)
+        [ -n "$zip" ] || die "No zip in ${exports} — WireGuard app → Export Tunnels to Zip… into ${exports}"
     fi
     [ -f "$zip" ] || die "No zip ${zip}"
-    mkdir -p "$CONFIGS" && chmod 700 "$CONFIGS"
-    tmp=$(mktemp -d "$CONFIGS/../.extract.XXXXXX") || die "mktemp failed"
+    mkdir -p "$configs" && chmod 700 "$configs"
+    tmp=$(mktemp -d "$configs/../.extract.XXXXXX") || die "mktemp failed"
     chmod 700 "$tmp"
-    unzip -qj "$zip" '*.conf' -d "$tmp" 2>/dev/null || { rm -rf "$tmp"; die "Can't unzip ${zip}"; }
+    unzip -qj "$zip" '*.conf' -d "$tmp" 2>/dev/null; rc=$?
+    # 11: nothing matched (said just below)
+    [ "$rc" -eq 0 ] || [ "$rc" -eq 11 ] || { rm -rf "$tmp"; die "Can't unzip ${zip}"; }
     for f in "$tmp"/*.conf; do [ -f "$f" ] && n=$((n + 1)); done
     [ "$n" -gt 0 ] || { rm -rf "$tmp"; die "No .conf files in ${zip}"; }
 
-    echo "Extracting ${zip} into ${CONFIGS}"
+    echo "Extracting ${zip} into ${configs}"
     for f in "$tmp"/*.conf; do
         name=$(basename "$f")
-        if [ -f "$CONFIGS/$name" ] && grep -q '^# wireguard-tools client:' "$CONFIGS/$name"; then
+        if [ -f "$configs/$name" ] && grep -q "^$mark" "$configs/$name"; then
             echo "  ${name%.conf}: kept (wireguard-tools' copy)"; rm -f "$f"
-        elif [ ! -f "$CONFIGS/$name" ]; then echo "  ${name%.conf}: new"
-        elif cmp -s "$f" "$CONFIGS/$name"; then echo "  ${name%.conf}: unchanged"
+        elif [ ! -f "$configs/$name" ]; then echo "  ${name%.conf}: new"
+        elif cmp -s "$f" "$configs/$name"; then echo "  ${name%.conf}: unchanged"
         else echo "  ${name%.conf}: updated"; fi
     done
-    for f in "$CONFIGS"/*.conf; do
+    for f in "$configs"/*.conf; do
         [ -f "$f" ] || continue
         name=$(basename "$f")
         [ -f "$tmp/$name" ] && continue
-        grep -q '^# wireguard-tools client:' "$f" && continue
+        grep -q "^$mark" "$f" && continue
         echo "  ${name%.conf}: removed (not in the zip)"
         rm -f "$f"
     done
     # Over the old ones: if this fails, the zip's configs are still in $tmp
     if compgen -G "$tmp/*.conf" >/dev/null; then
         chmod 600 "$tmp"/*.conf
-        mv -f "$tmp"/*.conf "$CONFIGS"/ || die "Can't move the configs into ${CONFIGS} (they're in ${tmp})"
+        mv -f "$tmp"/*.conf "$configs"/ || die "Can't move the configs into ${configs} (they're in ${tmp})"
     fi
     rm -rf "$tmp"
 }

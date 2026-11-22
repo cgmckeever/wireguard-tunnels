@@ -23,7 +23,7 @@ def source() -> str:
 
 def test_the_same_keepalive_and_warp_overhead():
     sh = source()
-    assert re.findall(r"PersistentKeepalive = (\d+)", sh) == [str(store.KEEPALIVE)] * 2
+    assert re.findall(r"PersistentKeepalive = (\d+)", sh) == [str(store.KEEPALIVE)]     # add_keepalive: one home
     assert set(re.findall(r"\$\(\(cm - (\d+)\)\)", sh)) == {str(store.WARP_OVERHEAD)}
 
 
@@ -114,3 +114,19 @@ def test_nord_sh_writes_the_same_keepalive():
 def test_nord_sh_writes_the_mark_wgtun_reads():
     with open(os.path.join(store.SCRIPTS, "nord.sh"), encoding="utf-8") as f:
         assert f'echo "{store.NORD_MARK} ' in f.read()
+
+
+def test_render_drops_hook_lines(tmp_path):
+    """A config's PreUp/PostUp/... would run as root on every up: the daemon's copy has none."""
+    path = tmp_path / "t.conf"
+    path.write_text("[Interface]\nPrivateKey = k\npostup = touch /tmp/owned\nPreDown=x\n[Peer]\nEndpoint = h:51820\n")
+    out = bash(functions("render"), 'render "$1" full 192.0.2.1', str(path)).stdout
+    assert "touch" not in out and "PreDown" not in out
+    assert "Table = off\n" in out and "Endpoint = 192.0.2.1:51820\n" in out
+
+
+def test_add_keepalive_replaces_any():
+    config = "[Peer]\nPERSISTENTKEEPALIVE = 0\nEndpoint = h:1\n"
+    out = subprocess.run([BASH, "-c", functions("add_keepalive") + "\nadd_keepalive"],
+                         input=config, capture_output=True, text=True).stdout
+    assert out == "[Peer]\nEndpoint = h:1\nPersistentKeepalive = 25\n"
