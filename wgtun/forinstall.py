@@ -6,7 +6,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from typing import List
 
@@ -18,28 +17,27 @@ from .store import KEEPALIVE, WARP_MTU, Error
 def daemon_warp(device_dir: str) -> str:
     """The daemon's WARP: carried inside a warped tunnel, so Table = off (the
     daemon routes), and always 1280 (tunnel.sh lowers it in a small carrier)."""
-    path = os.path.join(device_dir, "warp", "wgcf-profile.conf")
-    profile = Conf.read(path)
-    key, pub, addresses = profile.value("PrivateKey"), profile.value("PublicKey"), profile.items("Address")
-    if not (key and pub and addresses):
-        raise Error(f"Can't read PrivateKey/PublicKey/Address from {path}")
-    device = os.path.basename(os.path.abspath(device_dir))
-    return f"""# Written by wireguard-tunnels install.sh from ~/wg-tunnels/devices/{device}/warp/wgcf-profile.conf.
+    f = store.Folder(device_dir)
+    profile = Conf.read(f.profile)
+    why = profile.problem()             # as the sweep would skip it
+    if why:
+        raise Error(f"{f.profile}: {why}")
+    return f"""# Written by wireguard-tunnels install.sh from ~/wg-tunnels/devices/{f.name}/warp/wgcf-profile.conf.
 #
 # Cloudflare WARP exit, carried inside another WireGuard tunnel (warped.*). `tunnel.sh import`
 # copies it for the wg-tunnels daemon, which does the
 # routing; don't bring it up on its own. Table = off skips wg-quick's routing,
 # which would send the endpoint straight out the NIC, around the carrier.
 [Interface]
-PrivateKey = {key}
-Address = {", ".join(addresses)}
+PrivateKey = {profile.value("PrivateKey")}
+Address = {", ".join(profile.items("Address"))}
 DNS = 1.1.1.1
 # IPv6's minimum: fits in a carrier of 1360 or more (tunnel.sh lowers it in a smaller one)
 MTU = {WARP_MTU}
 Table = off
 
 [Peer]
-PublicKey = {pub}
+PublicKey = {profile.value("PublicKey")}
 AllowedIPs = 0.0.0.0/0, ::/0
 Endpoint = {store.warp_endpoint(device_dir)}
 # A stale handshake then means trouble, not idleness (the daemon's watchdog)

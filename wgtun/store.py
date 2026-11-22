@@ -8,7 +8,9 @@ import os
 import re
 import sys
 import tempfile
-from typing import Iterable, List, NoReturn
+from typing import Callable, Dict, Iterable, List, NoReturn
+
+from .conf import Conf, Error
 
 KEEPALIVE = 25                       # seconds: every one-tunnel config has one
 WARP_ENDPOINT = "162.159.192.1:2408"  # Cloudflare's, unless .warp-endpoint says otherwise
@@ -18,13 +20,10 @@ PLAIN_MTU = 1420                     # wg-quick's default
 SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
 
 
-class Error(Exception):
-    """A reason to stop, said once by the script's main()."""
-
-
-# What a main() reports as one line instead of a traceback: its own reasons,
-# and a file it can't read or write (permissions, a race, not UTF-8)
-FAILURES = (Error, OSError, UnicodeDecodeError)
+# What a main() reports as one line instead of a traceback: its own reasons
+# (a config that isn't UTF-8 is one: conf.Conf.read) and a file it can't read
+# or write (permissions, a race)
+FAILURES = (Error, OSError)
 
 
 def die(prog: str, msg: str) -> NoReturn:
@@ -40,6 +39,23 @@ def devices_dir() -> str:
     return os.path.join(root(), "devices")
 
 
+class Folder:
+    """A device's folder and what's in it."""
+
+    def __init__(self, path: str) -> None:
+        self.dir = path
+        self.name = os.path.basename(os.path.abspath(path))   # the device, always last in its tunnels' names
+        self.carriers = os.path.join(path, "carriers")       # WireGuard configs to carry WARP
+        self.config = os.path.join(path, "config")           # every tunnel the device runs
+        self.warp = os.path.join(path, "warp")               # its wgcf WARP account and profile
+        self.profile = os.path.join(self.warp, "wgcf-profile.conf")
+        self.sing_box = os.path.join(path, "sing-box")       # singbox.sh build's
+
+    @classmethod
+    def of(cls, device: str) -> Folder:
+        return cls(os.path.join(devices_dir(), device))
+
+
 def this_mac() -> str:
     """This Mac's device (tunnel.sh default), or ""."""
     try:
@@ -53,7 +69,10 @@ def collated(items: Iterable[str]) -> List[str]:
     """In the shell's order: the locale's collation (LC_COLLATE), as bash
     lists <folder>/*.conf and sort sorts. Which tunnel a composite profile
     picks first, and the order of a carrier's routes, follow it."""
-    locale.setlocale(locale.LC_COLLATE, "")
+    try:
+        locale.setlocale(locale.LC_COLLATE, "")
+    except locale.Error:            # a locale this Mac doesn't have: bash falls back to C too
+        locale.setlocale(locale.LC_COLLATE, "C")
     return sorted(items, key=locale.strxfrm)
 
 
@@ -149,3 +168,35 @@ def private_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
     os.chmod(path, 0o700)
 
+
+
+def check_keys(device: str, used: List[Conf], note: Callable[[str], None]) -> None:
+    """No private key on two devices (two devices on one key knock each other
+    off), wherever they run it. Names the files, never the key. Not Nord's
+    ("# source: nord"): Nord gives one key per account, so nord.sh keeps each
+    on its own server instead. A key used twice on one device only gets a
+    note: a device runs one tunnel (one profile) at a time, and sing-box
+    groups have no keepalives."""
+    def keyed(confs: List[Conf]) -> List[tuple]:
+        return [(c.value("PrivateKey"), os.path.relpath(c.path, devices_dir())) for c in confs
+                if c.value("PrivateKey") and not any(ln.startswith("# source: nord") for ln in c.lines)]
+
+    mine: Dict[str, str] = {}
+    same_device = []
+    for key, label in keyed(used):
+        if key in mine:
+            same_device.append(f"  {mine[key]} and {label}")
+        else:
+            mine[key] = label
+    others = []
+    for name in all_devices():
+        if name == device:
+            continue
+        f = Folder.of(name)
+        paths = files_in(f.carriers) + files_in(f.config) + ([f.profile] if os.path.isfile(f.profile) else [])
+        others += [f"  {mine[k]} and {label}" for k, label in keyed([Conf.read(p) for p in paths]) if k in mine]
+    if others:
+        raise Error("same private key in:\n" + "\n".join(others)
+                    + "\neach config needs its own (make a new one for this device)")
+    if same_device:
+        note("note: same private key in (fine on one device: one tunnel at a time):\n" + "\n".join(same_device))

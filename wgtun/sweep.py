@@ -175,20 +175,15 @@ def resolve(arg: str) -> str:
 
 class Sweep:
     def __init__(self, folder: str, app_column: bool = True) -> None:
-        self.dir = folder
-        self.device = os.path.basename(os.path.abspath(folder))
-        self.carriers_dir = os.path.join(folder, "carriers")
-        self.config_dir = os.path.join(folder, "config")
-        self.profile = os.path.join(folder, "warp", "wgcf-profile.conf")
+        self.f = store.Folder(folder)
         # Only a device folder gets swept: never make config/ in some other
         # folder named by mistake. A device with no carriers/ has plain
         # configs only (wireguard-tools makes those): nothing to sweep.
-        self.no_carriers = not os.path.isdir(self.carriers_dir)
+        self.no_carriers = not os.path.isdir(self.f.carriers)
         if self.no_carriers and not same_dir(os.path.dirname(os.path.abspath(folder)), store.devices_dir()):
             raise Error(f"no carriers/ in {folder} (singbox.sh new <device> makes a device)")
         mac = store.this_mac()
-        self.app = (app_column and bool(mac) and os.path.isdir(os.path.join(store.devices_dir(), mac))
-                    and same_dir(folder, os.path.join(store.devices_dir(), mac)))
+        self.app = app_column and bool(mac) and same_dir(folder, store.Folder.of(mac).dir)
         self.endpoint = store.warp_endpoint(folder)
         self.rows = self.plan()
 
@@ -197,8 +192,8 @@ class Sweep:
         rows: List[Row] = []
         claimed = set()
         warp_net = self.endpoint.rsplit(":", 1)[0] + "/32"
-        for path in store.files_in(self.carriers_dir):
-            name = store.warped_name(path, self.device)
+        for path in store.files_in(self.f.carriers):
+            name = store.warped_name(path, self.f.name)
             carrier = Conf.read(path)
             why = carrier.problem()       # first: a broken carrier doesn't take the name from a good one
             if why:
@@ -212,10 +207,10 @@ class Sweep:
             found = extras(carrier)
             text = render_warped(carrier, warp_net, found["kept"])
             rows.append(self.output(name, text, carrier_notes(carrier, found)))
-        if os.path.isfile(self.profile):
-            name = store.warp_alone(self.device)
+        if os.path.isfile(self.f.profile):
+            name = store.warp_alone(self.f.name)
             claimed.add(name)
-            profile = Conf.read(self.profile)
+            profile = Conf.read(self.f.profile)
             why = profile.problem()
             if why:
                 rows.append(Row(name, "skipped", detail=f"warp/wgcf-profile.conf: {why}"))
@@ -225,14 +220,14 @@ class Sweep:
                 rows.append(row)
         # config/ files no carrier claims: a warped one lost its carrier (an
         # orphan: reported, never deleted); anything else is someone else's
-        for path in store.files_in(self.config_dir):
+        for path in store.files_in(self.f.config):
             name = os.path.basename(path)[: -len(".conf")]
             if name not in claimed:
-                rows.append(Row(name, "orphan" if store.sweep_owned(name, self.device) else "manual", path=path))
+                rows.append(Row(name, "orphan" if store.sweep_owned(name, self.f.name) else "manual", path=path))
         return rows
 
     def output(self, name: str, text: str, notes: List[str]) -> Row:
-        path = os.path.join(self.config_dir, f"{name}.conf")
+        path = os.path.join(self.f.config, f"{name}.conf")
         return Row(name, store.state_of(path, text), path=path, text=text, notes=notes)
 
     def written(self) -> List[Row]:
@@ -241,15 +236,15 @@ class Sweep:
     def configs(self) -> List[Conf]:
         """config/ as it is once the sweep has run (read now, or as it will be)."""
         planned = {r.path: r.text for r in self.written()}
-        paths = store.collated(set(store.files_in(self.config_dir)) | set(planned))
+        paths = store.collated(set(store.files_in(self.f.config)) | set(planned))
         return [Conf(planned[p], p) if p in planned else Conf.read(p) for p in paths]
 
     def run(self, no_next: bool = False, out: Optional[TextIO] = None) -> None:
         out = out or sys.stdout
-        store.private_dir(self.dir)
-        store.private_dir(self.config_dir)
+        store.private_dir(self.f.dir)
+        store.private_dir(self.f.config)
         if not self.no_carriers:
-            os.chmod(self.carriers_dir, 0o700)
+            os.chmod(self.f.carriers, 0o700)
         for r in self.written():
             if r.state != "unchanged":
                 store.write_private(r.path, r.text)
@@ -258,17 +253,19 @@ class Sweep:
             print(f"{cols[0]:<40} {cols[1]:<10} {cols[2] if len(cols) > 2 else ''}", file=out)
 
         if self.no_carriers:
-            print(f"No carriers/ in {self.dir}: plain configs only "
-                  f"(singbox.sh new {self.device} adds carriers/)\n", file=out)
-        elif not store.files_in(self.carriers_dir):
-            print(f"No configs in {self.carriers_dir}: put WireGuard configs there "
-                  f"(x.conf becomes warped.x.{self.device})\n", file=out)
+            print(f"No carriers/ in {self.f.dir}: plain configs only "
+                  f"(singbox.sh new {self.f.name} adds carriers/)\n", file=out)
+        elif not store.files_in(self.f.carriers):
+            print(f"No configs in {self.f.carriers}: put WireGuard configs there "
+                  f"(x.conf becomes warped.x.{self.f.name})\n", file=out)
         say("TUNNEL", "FILE", "WIREGUARD APP (only if you use it)" if self.app else "")
         for r in self.rows:
             if r.detail:
                 say(r.name, r.state, r.detail)
             elif r.state == "orphan":
-                say(r.name, r.state, "(no usable carrier in carriers/: left in place)")
+                gone = "warp/wgcf-profile.conf" if r.name == store.warp_alone(self.f.name) \
+                    else "usable carrier in carriers/"
+                say(r.name, r.state, f"(no {gone}: left in place)")
             else:
                 say(r.name, r.state, self.app_action(r))
             for n in r.notes:
@@ -277,7 +274,7 @@ class Sweep:
             return
         print(file=out)
         if not no_next:
-            print(f"Next: tunnel.sh import   (installs everything in {self.config_dir} for the daemon)", file=out)
+            print(f"Next: tunnel.sh import   (installs everything in {self.f.config} for the daemon)", file=out)
         print("The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise.", file=out)
 
     def app_action(self, r: Row) -> str:
@@ -285,7 +282,6 @@ class Sweep:
         use the app). Nothing here is about tunnel.sh import, which reads config/."""
         if not self.app:
             return ""
-        state = "unchanged" if r.state == "manual" else r.state
         if not command(["scutil", "--nc", "status", r.name]).split("\n")[0]:
             return "not there: add it in the app"
         remote = next((ln.split(" : ", 1)[1] for ln in command(["scutil", "--nc", "show", r.name]).split("\n")
@@ -299,7 +295,7 @@ class Sweep:
             return f"there, other server ({remote or '?'}): remove it and add again in the app"
         return {"updated": "there, but changed: remove it and add again in the app",
                 "new": "there, same server: if the app's copy isn't this config, remove it and add again"}.get(
-                    state, "there, same server")
+                    r.state, "there, same server")
 
 
 def same_dir(a: str, b: str) -> bool:

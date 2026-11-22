@@ -66,11 +66,15 @@ def loud(text: str, err: bool = False) -> None:
 
 @dataclass
 class Unit:
-    """One tunnel: its endpoints, its extra route rules and the tun's MTU for it."""
-    tag: str
+    """One tunnel: its config, endpoints, extra route rules and the tun's MTU for it."""
+    conf: Conf
     endpoints: List[dict]
     rules: List[dict]
     mtu: int
+
+    @property
+    def tag(self) -> str:
+        return self.conf.name
 
 
 # --- sing-box JSON ---
@@ -147,19 +151,16 @@ def group_key(tag: str) -> str:
 
 # --- the tunnels of a device ---
 
-class Device:
+class Device(store.Folder):
+    """A device build and new can take: its name is one sing-box can use."""
+
     def __init__(self, name: str, verb: str) -> None:
         if not name:
             raise Error(f"a device name, please (singbox.sh {verb} <device>)")
         if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", name):
             raise Error("device names are letters, digits, . _ - (not starting with .)")
-        self.name = name
-        self.dir = os.path.join(store.devices_dir(), name)
-        self.profile = os.path.join(self.dir, "warp", "wgcf-profile.conf")
+        super().__init__(os.path.join(store.devices_dir(), name))
         self.setup = "install.sh" if name == store.this_mac() else f"{HERE} new {name}"
-
-    def label(self, path: str) -> str:
-        return os.path.relpath(path, store.devices_dir())
 
 
 def units(dev: Device, swept: sweep.Sweep, say: Say) -> List[Unit]:
@@ -167,11 +168,10 @@ def units(dev: Device, swept: sweep.Sweep, say: Say) -> List[Unit]:
     first (the composite's default is a warped one when there is one), then
     the plain ones, then WARP alone."""
     configs = swept.configs()
-    warp = next((c for c in configs if c.name == store.warp_alone(dev.name)), None)
-    if warp is not None and warp.problem():        # a stale copy of a profile the sweep skipped
-        say(f"skipped {warp.name}: {warp.problem()}", False)
-        warp = None
-    usable = {r.name for r in swept.written()}       # warped tunnels with a carrier the sweep could use
+    # What the sweep writes this run: warped tunnels with a carrier it could
+    # use, and WARP alone when warp/ has a usable profile (not a stale copy)
+    usable = {r.name for r in swept.written()}
+    warp = next((c for c in configs if c.name == store.warp_alone(dev.name) and c.name in usable), None)
     out: List[Unit] = []
     seen_cidrs: set = set()
     for c in [c for c in configs if c.name.startswith("warped.")] + \
@@ -190,7 +190,8 @@ def units(dev: Device, swept: sweep.Sweep, say: Say) -> List[Unit]:
         else:
             out.append(warped(c, mtu, warp, seen_cidrs, say))
     if warp is not None:
-        out.append(Unit(warp.name, [endpoint(warp, warp.name, warp.mtu(store.WARP_MTU))], [], warp.mtu(store.WARP_MTU)))
+        mtu = warp.mtu(store.WARP_MTU)
+        out.append(Unit(warp, [endpoint(warp, warp.name, mtu)], [], mtu))
     return out
 
 
@@ -204,7 +205,7 @@ def plain(c: Conf, mtu: int, say: Say) -> Unit:
     if not c.keepalive():
         say(f"warning: {c.name} has no PersistentKeepalive: its one-tunnel profile has none "
             f"(nor the WireGuard app's or tunnel.sh's copy); add one to {c.name}.conf", True)
-    return Unit(c.name, [endpoint(c, c.name, mtu)], [], mtu)
+    return Unit(c, [endpoint(c, c.name, mtu)], [], mtu)
 
 
 def warped(c: Conf, mtu: int, warp: Conf, seen_cidrs: set, say: Say) -> Unit:
@@ -221,42 +222,10 @@ def warped(c: Conf, mtu: int, warp: Conf, seen_cidrs: set, say: Say) -> Unit:
             say(f"warning: {cidr} is in two carriers: profiles with both send it to the first, not {carrier}", True)
         seen_cidrs.add(cidr)
     rules = [{"ip_cidr": own, "outbound": carrier}] if own else []
-    return Unit(c.name, [endpoint(c, carrier, mtu), endpoint(warp, c.name, wmtu, detour=carrier)], rules, wmtu)
+    return Unit(c, [endpoint(c, carrier, mtu), endpoint(warp, c.name, wmtu, detour=carrier)], rules, wmtu)
 
 
-# --- checks before writing ---
-
-def check_keys(dev: Device, used: List[Conf], say: Say) -> None:
-    """No private key shared with another device (two devices on one key knock
-    each other off). Names the files, never the key. Not Nord's ("# source:
-    nord"): Nord gives one key per account, so nord.sh keeps each on its own
-    server instead. A key used twice on one device only gets a note: a device
-    runs one tunnel (one profile) at a time, and groups have no keepalives."""
-    def keyed(confs: List[Conf]) -> List[tuple]:
-        return [(c.value("PrivateKey"), dev.label(c.path)) for c in confs
-                if c.value("PrivateKey") and not any(ln.startswith("# source: nord") for ln in c.lines)]
-
-    mine: Dict[str, str] = {}
-    same_device = []
-    for key, label in keyed(used):
-        if key in mine:
-            same_device.append(f"  {mine[key]} and {label}")
-        else:
-            mine[key] = label
-    others = []
-    for name in store.all_devices():
-        if name == dev.name:
-            continue
-        d = os.path.join(store.devices_dir(), name)
-        paths = store.files_in(os.path.join(d, "carriers")) + store.files_in(os.path.join(d, "config"))
-        paths += [p for p in [os.path.join(d, "warp", "wgcf-profile.conf")] if os.path.isfile(p)]
-        others += [f"  {mine[k]} and {label}" for k, label in keyed([Conf.read(p) for p in paths]) if k in mine]
-    if others:
-        raise Error("same private key in:\n" + "\n".join(others)
-                    + "\neach config needs its own (make a new one for this device)")
-    if same_device:
-        say("note: same private key in (fine on one device: one tunnel at a time):\n" + "\n".join(same_device), True)
-
+# --- a check before writing ---
 
 def check_tags(dev: Device, made: List[Unit]) -> None:
     """Endpoint names are unique ("tunnel" is the picker's), and no tunnel is
@@ -280,9 +249,8 @@ def plan(dev: Device, swept: sweep.Sweep, say: Say) -> Dict[str, str]:
     """Every profile build writes, by file name; changes nothing."""
     made = units(dev, swept, say)
     if not [u for u in made if u.tag != store.warp_alone(dev.name)]:
-        raise Error(f"nothing to build: put configs in {dev.dir}/carriers or {dev.dir}/config")
-    confs = {c.name: c for c in swept.configs()}
-    check_keys(dev, [confs[u.tag] for u in made], say)
+        raise Error(f"nothing to build: put configs in {dev.carriers} or {dev.config}")
+    store.check_keys(dev.name, [u.conf for u in made], lambda text: say(text, True))
     check_tags(dev, made)
     files = {f"{u.tag}.json": single_profile(u) for u in made}
     files[f"{dev.name}.json"] = group_profile(made)
@@ -320,7 +288,7 @@ def cmd_build(name: str) -> None:
     print()
     files = plan(dev, swept, loud)
 
-    out = os.path.join(dev.dir, "sing-box")
+    out = dev.sing_box
     store.private_dir(out)
     print(f"== Profiles in {out}")
     checked = sing_box_check(files)
@@ -379,28 +347,26 @@ def wgcf(folder: str, *args: str) -> None:
 
 def cmd_new(name: str) -> None:
     dev = Device(name, "new")
-    subs = [os.path.join(dev.dir, s) for s in ("carriers", "warp", "config")]
-    for d in (store.root(), store.devices_dir(), dev.dir, *subs):
+    for d in (store.root(), store.devices_dir(), dev.dir, dev.carriers, dev.warp, dev.config):
         store.private_dir(d)
-    warp = os.path.join(dev.dir, "warp")
-    account = os.path.join(warp, "wgcf-account.toml")
+    account = os.path.join(dev.warp, "wgcf-account.toml")
     if os.path.isfile(account):
         print("WARP account: already there")
     else:
-        wgcf(warp, "register", "--accept-tos")
+        wgcf(dev.warp, "register", "--accept-tos")
         if os.path.exists(dev.profile):
             os.remove(dev.profile)          # one left from an earlier account
         print("WARP account: registered")
     os.chmod(account, 0o600)
     if not os.path.isfile(dev.profile):
-        wgcf(warp, "generate")
+        wgcf(dev.warp, "generate")
     os.chmod(dev.profile, 0o600)
     # config/warp.<device>.conf (WARP alone, for the WireGuard app) now, for a device that never runs build
     with open(os.devnull, "w") as quiet:
         sweep_for(dev).run(out=quiet)
-    print(f"WireGuard app config: {dev.dir}/config/warp.{name}.conf (WARP alone)\n")
-    print(f"Next: put this device's carriers in {dev.dir}/carriers/ and its plain tunnels\n"
-          f"      in {dev.dir}/config/ (new WireGuard configs made for this device)\n"
+    print(f"WireGuard app config: {dev.config}/{store.warp_alone(name)}.conf (WARP alone)\n")
+    print(f"Next: put this device's carriers in {dev.carriers}/ and its plain tunnels\n"
+          f"      in {dev.config}/ (new WireGuard configs made for this device)\n"
           f"then: {HERE} build {name}")
 
 
@@ -412,13 +378,11 @@ def cmd_list() -> None:
     print(f"{'DEVICE':<20} {'CARRIERS':<9} {'TUNNELS':<8} {'WARP':<5} PROFILES")
     mac = store.this_mac()
     for name in names:
-        d = os.path.join(store.devices_dir(), name)
-        profiles = os.path.join(d, "sing-box")
-        n_profiles = len(store.files_in(profiles, ".json"))
+        f = store.Folder.of(name)
         shown = name + (" (this Mac)" if name == mac else "")
-        warp = "yes" if os.path.isfile(os.path.join(d, "warp", "wgcf-profile.conf")) else "no"
-        print(f"{shown:<20} {len(store.files_in(os.path.join(d, 'carriers'))):<9} "
-              f"{len(store.files_in(os.path.join(d, 'config'))):<8} {warp:<5} {n_profiles}")
+        warp = "yes" if os.path.isfile(f.profile) else "no"
+        print(f"{shown:<20} {len(store.files_in(f.carriers)):<9} {len(store.files_in(f.config)):<8} {warp:<5} "
+              f"{len(store.files_in(f.sing_box, '.json'))}")
 
 
 def main(argv: Optional[List[str]] = None) -> int:

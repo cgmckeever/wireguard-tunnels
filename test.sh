@@ -8,10 +8,13 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 RUFF=0.17.4     # as in wireguard-tools; also in pyproject.toml
+# The oldest Python the scripts must run on: macOS's own (3.9), when it's here
+PY=/usr/bin/python3; [ -x "$PY" ] || PY=python3
 if [ ! -x .venv/bin/python ] || ! .venv/bin/python -c 'import pytest, ruff, mypy' 2>/dev/null \
-    || [ "$(.venv/bin/ruff --version)" != "ruff $RUFF" ]; then
-    echo "==> Setting up .venv with pytest, ruff and mypy (first run only)"
-    python3 -m venv .venv
+    || [ "$(.venv/bin/ruff --version)" != "ruff $RUFF" ] \
+    || [ "$(.venv/bin/python -V 2>&1)" != "$("$PY" -V 2>&1)" ]; then
+    echo "==> Setting up .venv ($("$PY" -V 2>&1)) with pytest, ruff and mypy"
+    "$PY" -m venv --clear .venv
     .venv/bin/pip install -q pytest "ruff==$RUFF" mypy
 fi
 lint() {

@@ -147,10 +147,20 @@ def test_cli(store, capsys):
             sweep.main(args)
         assert "usage: wgwarp-sweep.sh" in capsys.readouterr().err
     store.device("ph")
-    store.put("devices/ph/carriers/srv.conf", "\xff not utf-8")
-    os.chmod(store.path("devices/ph/carriers"), 0o700)
-    with open(store.path("devices/ph/carriers/srv.conf"), "wb") as f:
+    path = store.put("devices/ph/carriers/srv.conf", "")
+    with open(path, "wb") as f:
         f.write(b"\xff\xfe")
     with pytest.raises(SystemExit):
         sweep.main(["ph"])
-    assert capsys.readouterr().err.startswith("wgwarp-sweep.sh: ")     # a line, not a traceback
+    assert capsys.readouterr().err == f"wgwarp-sweep.sh: {path}: not UTF-8 text\n"     # a line, not a traceback
+
+
+def test_warp_alone_without_a_profile_is_an_orphan(store, capsys):
+    store.device("ph")
+    run(store, "ph")
+    os.remove(store.path("devices/ph/warp/wgcf-profile.conf"))
+    s = sweep.Sweep(store.path("devices/ph"), app_column=False)
+    s.run()
+    assert "warp.ph                                  orphan     (no warp/wgcf-profile.conf: left in place)" \
+        in capsys.readouterr().out
+    assert s.written() == []

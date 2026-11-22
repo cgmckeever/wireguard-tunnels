@@ -71,7 +71,35 @@ def test_a_dotfile_isnt_a_profile(store):
 
 
 def test_a_device_name_build_cant_take(store):
+    """Fine for the WireGuard app; an error once the device has sing-box profiles."""
     store.device("my phone", carriers=False, warp=False)
     store.put("devices/my phone/config/srv.conf", client("srv"))
+    assert check.check_device("my phone") == []
+    os.makedirs(store.path("devices/my phone/sing-box"), mode=0o700)
     assert check.check_device("my phone") == [
         ("error", "device names are letters, digits, . _ - (not starting with .)")]
+
+
+def test_every_private_file_and_folder(store):
+    built_phone(store)
+    store.put("devices/ph/exports/tunnels.zip", "keys", mode=0o644)
+    store.put("devices/ph/warp/wgcf-account.toml", "token", mode=0o644)
+    store.put("devices/ph/carriers/.DS_Store", "finder", mode=0o644)
+    os.chmod(store.path("devices/ph/config"), 0o755)
+    found = check.check_device("ph")
+    assert ("error", "exports/tunnels.zip is 644, should be 600") in found
+    assert ("error", "warp/wgcf-account.toml is 644, should be 600") in found
+    assert ("error", "config/ is 755, should be 700") in found
+    assert not any(".DS_Store" in what for _, what in found)
+
+
+def test_one_bad_device_doesnt_stop_the_rest(store, capsys):
+    built_phone(store)
+    path = store.put("devices/ph/config/bad.ph.conf", "")
+    with open(path, "wb") as f:
+        f.write(b"\xff")
+    assert check.main(["nosuch", "ph"]) == 1
+    out = capsys.readouterr().out
+    assert "nosuch\n  error: no device nosuch" in out
+    assert f"error: {path}: not UTF-8 text" in out
+    assert out.endswith("errors in 2 devices\n")

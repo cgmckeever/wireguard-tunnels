@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
@@ -140,14 +141,29 @@ def test_plain_device_and_nothing_to_build(store):
     assert sorted(build(store, "tv")[0]) == ["srv.tv.json", "tv.json"]
 
 
+def profile_states(out: str) -> dict:
+    """build's "<file> <state>" lines."""
+    return {ln.split()[0]: " ".join(ln.split()[1:]) for ln in out.split("\n") if ln.split()[:1]
+            and ln.split()[0].endswith(".json")}
+
+
 def test_cmd_build_writes_and_removes(phone, capsys):
     phone.put("devices/ph/sing-box/old.json", "{}\n")
     singbox.cmd_build("ph")
-    out = capsys.readouterr().out
-    assert "old.json                                         removed (no longer built)" in out
-    assert "ph.json                                          new" in out
+    states = profile_states(capsys.readouterr().out)
+    assert states["old.json"] == "removed (no longer built)"
+    assert states["ph.json"] == "new"
     singbox.cmd_build("ph")
-    assert "new" not in capsys.readouterr().out.split("== Profiles")[1].split("\n\n")[0]
+    assert set(profile_states(capsys.readouterr().out).values()) == {"unchanged"}
+
+
+def test_warp_without_its_profile_isnt_built(phone, capsys):
+    """A config/warp.<device>.conf left after warp/ is gone is an orphan, not WARP."""
+    singbox.cmd_build("ph")
+    os.remove(phone.path("devices/ph/warp/wgcf-profile.conf"))
+    files, said = build(phone, "ph")
+    assert "warp.ph.json" not in files
+    assert "skipped warped.proton.chi.ph: no WARP profile" in said
 
 
 def test_a_broken_warp_profile_isnt_built(phone, capsys):
@@ -155,7 +171,7 @@ def test_a_broken_warp_profile_isnt_built(phone, capsys):
     files, said = build(phone, "ph")
     assert "warp.ph.json" not in files
     assert "skipped warped.proton.chi.ph: no WARP profile" in said
-    with pytest.raises(Error, match="WARP profile .*: no \\[Peer\\]|WARP profile .*: 0 \\[Peer\\]"):
+    with pytest.raises(Error, match=r"WARP profile .*wgcf-profile.conf: 0 \[Peer\] sections, needs one"):
         singbox.cmd_build("ph")
 
 

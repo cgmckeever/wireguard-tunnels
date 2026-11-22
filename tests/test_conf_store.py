@@ -91,3 +91,8 @@ def test_collated_is_the_shells_order(monkeypatch):
     assert store.collated(names) == ["home", "srv", "Upper", "warped_z", "warped-y", "warped.q"]
     assert store.collated(["fd00:1::/48", "FE80::/10", "fd00::/8", "10.9.8.0/24", "100.64.0.0/10"]) == \
         ["10.9.8.0/24", "100.64.0.0/10", "fd00::/8", "fd00:1::/48", "FE80::/10"]
+
+
+def test_collated_on_a_locale_this_mac_doesnt_have(monkeypatch):
+    monkeypatch.setenv("LC_ALL", "xx_NOPE.UTF-8")
+    assert store.collated(["b", "a", "B"]) == ["B", "a", "b"]     # C, as bash falls back to

@@ -8,7 +8,9 @@ Usage:
 For each device:
   - every config in carriers/ and config/, and warp/wgcf-profile.conf, is a
     usable one-peer config
-  - every file is 0600 and every folder 0700 (they hold private keys)
+  - every file in carriers/, config/, warp/, exports/ and sing-box/ is 0600,
+    and the device's folders 0700 (they hold private keys)
+  - no private key is on another device too (both would drop)
   - every config/ tunnel has a keepalive: the WireGuard app (qr.sh), tunnel.sh
     and sing-box all use config/ as it is, so one without has none anywhere
   - config/'s warped.* and warp.<device>.conf are what the sweep writes now
@@ -26,12 +28,12 @@ from typing import List, Optional, Tuple
 
 from . import singbox, store, sweep
 from .conf import Conf
-from .store import Error
 
 Found = List[Tuple[str, str]]      # (error or warning, what)
+PRIVATE = ("carriers", "config", "warp", "exports", "sing-box")   # what holds keys
 
 
-def quiet(_text: str, _err: bool) -> None:
+def quiet(_text: str, _err: bool = False) -> None:
     """build's own notes and warnings: the check says its own."""
 
 
@@ -39,62 +41,77 @@ def mode(path: str) -> int:
     return stat.S_IMODE(os.stat(path).st_mode)
 
 
-def check_device(name: str) -> Found:
+def modes(f: store.Folder) -> Found:
     found: Found = []
-    d = os.path.join(store.devices_dir(), name)
-    folders = [d] + [os.path.join(d, s) for s in ("carriers", "config", "warp", "sing-box")]
-    confs = store.files_in(folders[1]) + store.files_in(folders[2])
-    profile = os.path.join(d, "warp", "wgcf-profile.conf")
-    if os.path.isfile(profile):
-        confs.append(profile)
-    profiles = folders[4]
-    jsons = store.files_in(profiles, ".json")
+    folders = [f.dir] + [os.path.join(f.dir, sub) for sub in PRIVATE]
+    for d in (d for d in folders if os.path.isdir(d)):
+        if mode(d) != 0o700:
+            found.append(("error", f"{os.path.relpath(d, f.dir)}/ is {mode(d):o}, should be 700"))
+        if d == f.dir:
+            continue
+        for name in sorted(n for n in os.listdir(d) if n != ".DS_Store"):     # Finder's, not ours
+            path = os.path.join(d, name)
+            if os.path.isfile(path) and mode(path) != 0o600:
+                found.append(("error", f"{os.path.relpath(path, f.dir)} is {mode(path):o}, should be 600"))
+    return found
 
-    def label(path: str) -> str:
-        return os.path.relpath(path, d)
 
-    for f in folders:
-        if os.path.isdir(f) and mode(f) != 0o700:
-            found.append(("error", f"{label(f)}/ is {mode(f):o}, should be 700"))
-    for f in confs + jsons:
-        if mode(f) != 0o600:
-            found.append(("error", f"{label(f)} is {mode(f):o}, should be 600"))
-    for f in confs:
-        c = Conf.read(f)
+def check_device(name: str) -> Found:
+    f = store.Folder.of(name)
+    found = modes(f)
+    for path in store.files_in(f.carriers) + store.files_in(f.config) + \
+            ([f.profile] if os.path.isfile(f.profile) else []):
+        try:
+            c = Conf.read(path)
+        except store.FAILURES as e:
+            found.append(("error", str(e)))
+            continue
         why = c.problem()
         if why:
-            found.append(("error", f"{label(f)}: {why}"))
-        elif f.startswith(folders[2] + os.sep) and not c.keepalive():
-            found.append(("warning", f"{label(f)}: no PersistentKeepalive, so none in the WireGuard app, "
-                                     "tunnel.sh or its sing-box profile either"))
-
-    fix = f"run singbox.sh build {name}" if os.path.isdir(profiles) else f"run wgwarp-sweep.sh {name}"
+            found.append(("error", f"{os.path.relpath(path, f.dir)}: {why}"))
+        elif os.path.dirname(path) == f.config and not c.keepalive():
+            found.append(("warning", f"{os.path.relpath(path, f.dir)}: no PersistentKeepalive, so none in the "
+                                     "WireGuard app, tunnel.sh or its sing-box profile either"))
     try:
-        swept = sweep.Sweep(d, app_column=False)
-    except Error as e:
-        return found + [("error", f"the sweep would stop: {e}")]
+        found += up_to_date(f)
+    except store.FAILURES as e:        # the sweep or build would stop: a shared key, say
+        found.append(("error", str(e)))
+    return found
+
+
+def up_to_date(f: store.Folder) -> Found:
+    """config/ and sing-box/ against what the sweep and build would write now."""
+    found: Found = []
+    fix = f"run singbox.sh build {f.name}" if os.path.isdir(f.sing_box) else f"run wgwarp-sweep.sh {f.name}"
+    swept = sweep.Sweep(f.dir, app_column=False)
     for r in swept.written():
         if r.state != "unchanged":
-            found.append(("error", f"{label(r.path)} is {'missing' if r.state == 'new' else 'out of date'}: {fix}"))
-    try:
-        dev = singbox.Device(name, "build")
-        singbox.check_keys(dev, swept.configs(), quiet)    # wherever the device runs them
-    except Error as e:
-        return found + [("error", str(e))]
-    if not os.path.isdir(profiles):
+            what = "missing" if r.state == "new" else "out of date"
+            found.append(("error", f"{os.path.relpath(r.path, f.dir)} is {what}: {fix}"))
+    if not os.path.isdir(f.sing_box):
+        store.check_keys(f.name, swept.configs(), quiet)      # build checks them itself
         return found
-    try:
-        built = singbox.plan(dev, swept, quiet)
-    except Error as e:
-        return found + [("error", f"singbox.sh build would stop: {e}")]
-    for f, text in built.items():
-        state = store.state_of(os.path.join(profiles, f), text)
+    built = singbox.plan(singbox.Device(f.name, "build"), swept, quiet)
+    for file, text in built.items():
+        state = store.state_of(os.path.join(f.sing_box, file), text)
         if state != "unchanged":
-            found.append(("error", f"sing-box/{f} is {'missing' if state == 'new' else 'out of date'}: {fix}"))
-    for f in jsons:
-        if os.path.basename(f) not in built:
-            found.append(("error", f"sing-box/{os.path.basename(f)} isn't a profile build makes: {fix}"))
+            found.append(("error", f"sing-box/{file} is {'missing' if state == 'new' else 'out of date'}: {fix}"))
+    for path in store.files_in(f.sing_box, ".json"):
+        if os.path.basename(path) not in built:
+            found.append(("error", f"sing-box/{os.path.basename(path)} isn't a profile build makes: {fix}"))
     return found
+
+
+def report(name: str) -> int:
+    """Print what's wrong with a device; how many errors."""
+    if not os.path.isdir(store.Folder.of(name).dir):
+        found: Found = [("error", f"no device {name}")]
+    else:
+        found = check_device(name)
+    print(f"{name:<20} {'ok' if not found else ''}".rstrip())
+    for kind, what in found:
+        print(f"  {kind}: " + what.replace("\n", "\n    "))
+    return sum(1 for kind, _ in found if kind == "error")
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -105,25 +122,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     names = args or store.all_devices()
     if not names:
         store.die("check.sh", f"no devices in {store.devices_dir()}")
-    errors = 0
-    try:
-        for name in names:
-            errors += report(name)
-    except store.FAILURES as e:
-        store.die("check.sh", str(e))
+    errors = sum(report(name) for name in names)
     print(f"\n{errors} error{'s' * (errors != 1)} in {len(names)} device{'s' * (len(names) != 1)}")
     return 1 if errors else 0
-
-
-def report(name: str) -> int:
-    """Print what's wrong with a device; how many errors."""
-    if not os.path.isdir(os.path.join(store.devices_dir(), name)):
-        raise Error(f"no device {name}")
-    found = check_device(name)
-    print(f"{name:<20} {'ok' if not found else ''}".rstrip())
-    for kind, what in found:
-        print(f"  {kind}: " + what.replace("\n", "\n    "))
-    return sum(1 for kind, _ in found if kind == "error")
 
 
 if __name__ == "__main__":

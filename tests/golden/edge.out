@@ -1,0 +1,299 @@
+### sweep-default (exit 0)
+TUNNEL                                   FILE       WIREGUARD APP (only if you use it)
+warped.broken.edge1                      skipped    broken.conf: 2 [Peer] sections, needs one
+warped.z.edge1                           new        not there: add it in the app
+warped.open.edge1                        new        not there: add it in the app
+warped.q.edge1                           new        not there: add it in the app
+warped.y.edge1                           new        not there: add it in the app
+warped.q.edge1                           skipped    warped.q.conf: another carrier already makes warped.q.edge1
+warped.x.edge1                           new        not there: add it in the app
+                                         └ also carries 10.9.8.0/24, 192.168.5.0/24, fd00:1::/48
+                                         └ ignored, too wide (would bypass WARP): 10.0.0.0/4
+                                         └ ignored, not an address: not-an-ip, 300.1.1.1
+                                         └ carrier MTU 1300: WARP runs at 1220 inside (IPv6 and QUIC fall back)
+warp.edge1                               new        (WARP alone, a plain tunnel)
+home.lan.edge1                           manual     not there: add it in the app
+nopub.edge1                              manual     not there: add it in the app
+srv.full.edge1                           manual     not there: add it in the app
+srv.zz.edge1                             manual     not there: add it in the app
+Upper.edge1                              manual     not there: add it in the app
+warped.gone.edge1                        orphan     (no usable carrier in carriers/: left in place)
+
+Next: tunnel.sh import   (installs everything in <store>/devices/edge1/config for the daemon)
+The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise.
+--- stderr
+### sweep-edge1 (exit 0)
+TUNNEL                                   FILE       WIREGUARD APP (only if you use it)
+warped.broken.edge1                      skipped    broken.conf: 2 [Peer] sections, needs one
+warped.z.edge1                           unchanged  not there: add it in the app
+warped.open.edge1                        unchanged  not there: add it in the app
+warped.q.edge1                           unchanged  not there: add it in the app
+warped.y.edge1                           unchanged  not there: add it in the app
+warped.q.edge1                           skipped    warped.q.conf: another carrier already makes warped.q.edge1
+warped.x.edge1                           unchanged  not there: add it in the app
+                                         └ also carries 10.9.8.0/24, 192.168.5.0/24, fd00:1::/48
+                                         └ ignored, too wide (would bypass WARP): 10.0.0.0/4
+                                         └ ignored, not an address: not-an-ip, 300.1.1.1
+                                         └ carrier MTU 1300: WARP runs at 1220 inside (IPv6 and QUIC fall back)
+warp.edge1                               unchanged  (WARP alone, a plain tunnel)
+home.lan.edge1                           manual     not there: add it in the app
+nopub.edge1                              manual     not there: add it in the app
+srv.full.edge1                           manual     not there: add it in the app
+srv.zz.edge1                             manual     not there: add it in the app
+Upper.edge1                              manual     not there: add it in the app
+warped.gone.edge1                        orphan     (no usable carrier in carriers/: left in place)
+
+Next: tunnel.sh import   (installs everything in <store>/devices/edge1/config for the daemon)
+The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise.
+--- stderr
+### build-edge1 (exit 0)
+== Sweep <store>/devices/edge1
+TUNNEL                                   FILE       
+warped.broken.edge1                      skipped    broken.conf: 2 [Peer] sections, needs one
+warped.z.edge1                           unchanged  
+warped.open.edge1                        unchanged  
+warped.q.edge1                           unchanged  
+warped.y.edge1                           unchanged  
+warped.q.edge1                           skipped    warped.q.conf: another carrier already makes warped.q.edge1
+warped.x.edge1                           unchanged  
+                                         └ also carries 10.9.8.0/24, 192.168.5.0/24, fd00:1::/48
+                                         └ ignored, too wide (would bypass WARP): 10.0.0.0/4
+                                         └ ignored, not an address: not-an-ip, 300.1.1.1
+                                         └ carrier MTU 1300: WARP runs at 1220 inside (IPv6 and QUIC fall back)
+warp.edge1                               unchanged  (WARP alone, a plain tunnel)
+home.lan.edge1                           manual     
+nopub.edge1                              manual     
+srv.full.edge1                           manual     
+srv.zz.edge1                             manual     
+Upper.edge1                              manual     
+warped.gone.edge1                        orphan     (no usable carrier in carriers/: left in place)
+
+skipped warped.gone.edge1: no usable carrier for it in carriers/ (delete it if that's for good)
+skipped nopub.edge1: no PublicKey
+== Profiles in <store>/devices/edge1/sing-box
+warped.open.edge1.json                           new
+warped.q.edge1.json                              new
+warped.x.edge1.json                              new
+warped.y.edge1.json                              new
+warped.z.edge1.json                              new
+home.lan.edge1.json                              new
+srv.full.edge1.json                              new
+srv.zz.edge1.json                                new
+Upper.edge1.json                                 new
+warp.edge1.json                                  new
+edge1.json                                       new
+warped.list.edge1.json                           new
+srv.list.edge1.json                              new
+(not checked: sing-box isn't installed on this Mac)
+
+Next: import the profiles you want in the sing-box app on this Mac
+      (Profiles > New Profile > Import). They use the daemon's keys: run
+      tunnel.sh down before turning sing-box on, and turn sing-box off
+      before tunnel.sh up. sing-box has no kill switch once it stops.
+--- stderr
+warning: home.lan.edge1 is a split tunnel (no 0.0.0.0/0): in sing-box it takes all traffic, and only its own networks work
+warning: home.lan.edge1 has no PersistentKeepalive: its one-tunnel profile has none (nor the WireGuard app's or tunnel.sh's copy); add one to home.lan.edge1.conf
+### rebuild-edge1 (exit 0)
+== Sweep <store>/devices/edge1
+TUNNEL                                   FILE       
+warped.broken.edge1                      skipped    broken.conf: 2 [Peer] sections, needs one
+warped.z.edge1                           unchanged  
+warped.open.edge1                        unchanged  
+warped.q.edge1                           unchanged  
+warped.y.edge1                           unchanged  
+warped.q.edge1                           skipped    warped.q.conf: another carrier already makes warped.q.edge1
+warped.x.edge1                           unchanged  
+                                         └ also carries 10.9.8.0/24, 192.168.5.0/24, fd00:1::/48
+                                         └ ignored, too wide (would bypass WARP): 10.0.0.0/4
+                                         └ ignored, not an address: not-an-ip, 300.1.1.1
+                                         └ carrier MTU 1300: WARP runs at 1220 inside (IPv6 and QUIC fall back)
+warp.edge1                               unchanged  (WARP alone, a plain tunnel)
+home.lan.edge1                           manual     
+nopub.edge1                              manual     
+srv.full.edge1                           manual     
+srv.zz.edge1                             manual     
+Upper.edge1                              manual     
+warped.gone.edge1                        orphan     (no usable carrier in carriers/: left in place)
+
+skipped warped.gone.edge1: no usable carrier for it in carriers/ (delete it if that's for good)
+skipped nopub.edge1: no PublicKey
+== Profiles in <store>/devices/edge1/sing-box
+warped.open.edge1.json                           unchanged
+warped.q.edge1.json                              unchanged
+warped.x.edge1.json                              unchanged
+warped.y.edge1.json                              unchanged
+warped.z.edge1.json                              unchanged
+home.lan.edge1.json                              unchanged
+srv.full.edge1.json                              unchanged
+srv.zz.edge1.json                                unchanged
+Upper.edge1.json                                 unchanged
+warp.edge1.json                                  unchanged
+edge1.json                                       unchanged
+warped.list.edge1.json                           unchanged
+srv.list.edge1.json                              unchanged
+(not checked: sing-box isn't installed on this Mac)
+
+Next: import the profiles you want in the sing-box app on this Mac
+      (Profiles > New Profile > Import). They use the daemon's keys: run
+      tunnel.sh down before turning sing-box on, and turn sing-box off
+      before tunnel.sh up. sing-box has no kill switch once it stops.
+--- stderr
+warning: home.lan.edge1 is a split tunnel (no 0.0.0.0/0): in sing-box it takes all traffic, and only its own networks work
+warning: home.lan.edge1 has no PersistentKeepalive: its one-tunnel profile has none (nor the WireGuard app's or tunnel.sh's copy); add one to home.lan.edge1.conf
+### sweep-edge2 (exit 0)
+No carriers/ in <store>/devices/edge2: plain configs only (singbox.sh new edge2 adds carriers/)
+
+TUNNEL                                   FILE       
+srv.chi.edge2                            manual     
+srv.nyc.edge2                            manual     
+--- stderr
+### build-edge2 (exit 1)
+No WARP profile in <store>/devices/edge2/warp: plain tunnels only (<scripts>/singbox.sh new edge2 adds WARP)
+== Sweep <store>/devices/edge2
+No carriers/ in <store>/devices/edge2: plain configs only (singbox.sh new edge2 adds carriers/)
+
+TUNNEL                                   FILE       
+srv.chi.edge2                            manual     
+srv.nyc.edge2                            manual     
+
+--- stderr
+singbox.sh: same private key in:
+  edge2/config/srv.chi.edge2.conf and edge3/config/dup.edge3.conf
+each config needs its own (make a new one for this device)
+### rebuild-edge2 (exit 1)
+No WARP profile in <store>/devices/edge2/warp: plain tunnels only (<scripts>/singbox.sh new edge2 adds WARP)
+== Sweep <store>/devices/edge2
+No carriers/ in <store>/devices/edge2: plain configs only (singbox.sh new edge2 adds carriers/)
+
+TUNNEL                                   FILE       
+srv.chi.edge2                            manual     
+srv.nyc.edge2                            manual     
+
+--- stderr
+singbox.sh: same private key in:
+  edge2/config/srv.chi.edge2.conf and edge3/config/dup.edge3.conf
+each config needs its own (make a new one for this device)
+### sweep-edge3 (exit 0)
+No configs in <store>/devices/edge3/carriers: put WireGuard configs there (x.conf becomes warped.x.edge3)
+
+TUNNEL                                   FILE       
+dup.edge3                                manual     
+--- stderr
+### build-edge3 (exit 1)
+No WARP profile in <store>/devices/edge3/warp: plain tunnels only (<scripts>/singbox.sh new edge3 adds WARP)
+== Sweep <store>/devices/edge3
+No configs in <store>/devices/edge3/carriers: put WireGuard configs there (x.conf becomes warped.x.edge3)
+
+TUNNEL                                   FILE       
+dup.edge3                                manual     
+
+--- stderr
+singbox.sh: same private key in:
+  edge3/config/dup.edge3.conf and edge2/config/srv.chi.edge2.conf
+each config needs its own (make a new one for this device)
+### rebuild-edge3 (exit 1)
+No WARP profile in <store>/devices/edge3/warp: plain tunnels only (<scripts>/singbox.sh new edge3 adds WARP)
+== Sweep <store>/devices/edge3
+No configs in <store>/devices/edge3/carriers: put WireGuard configs there (x.conf becomes warped.x.edge3)
+
+TUNNEL                                   FILE       
+dup.edge3                                manual     
+
+--- stderr
+singbox.sh: same private key in:
+  edge3/config/dup.edge3.conf and edge2/config/srv.chi.edge2.conf
+each config needs its own (make a new one for this device)
+### sweep-edge4 (exit 0)
+No carriers/ in <store>/devices/edge4: plain configs only (singbox.sh new edge4 adds carriers/)
+
+TUNNEL                                   FILE       
+edge4                                    manual     
+--- stderr
+### build-edge4 (exit 1)
+No WARP profile in <store>/devices/edge4/warp: plain tunnels only (<scripts>/singbox.sh new edge4 adds WARP)
+== Sweep <store>/devices/edge4
+No carriers/ in <store>/devices/edge4: plain configs only (singbox.sh new edge4 adds carriers/)
+
+TUNNEL                                   FILE       
+edge4                                    manual     
+
+--- stderr
+singbox.sh: a tunnel can't be named edge4: edge4.json is the composite (rename the config)
+### rebuild-edge4 (exit 1)
+No WARP profile in <store>/devices/edge4/warp: plain tunnels only (<scripts>/singbox.sh new edge4 adds WARP)
+== Sweep <store>/devices/edge4
+No carriers/ in <store>/devices/edge4: plain configs only (singbox.sh new edge4 adds carriers/)
+
+TUNNEL                                   FILE       
+edge4                                    manual     
+
+--- stderr
+singbox.sh: a tunnel can't be named edge4: edge4.json is the composite (rename the config)
+### sweep-edge5 (exit 0)
+No configs in <store>/devices/edge5/carriers: put WireGuard configs there (x.conf becomes warped.x.edge5)
+
+TUNNEL                                   FILE       
+warp.edge5                               new        (WARP alone, a plain tunnel)
+nord.us1.edge5                           manual     
+nord.us2.edge5                           manual     
+--- stderr
+### build-edge5 (exit 0)
+== Sweep <store>/devices/edge5
+No configs in <store>/devices/edge5/carriers: put WireGuard configs there (x.conf becomes warped.x.edge5)
+
+TUNNEL                                   FILE       
+warp.edge5                               unchanged  (WARP alone, a plain tunnel)
+nord.us1.edge5                           manual     
+nord.us2.edge5                           manual     
+
+== Profiles in <store>/devices/edge5/sing-box
+nord.us1.edge5.json                              new
+nord.us2.edge5.json                              new
+warp.edge5.json                                  new
+edge5.json                                       new
+nord.list.edge5.json                             new
+(not checked: sing-box isn't installed on this Mac)
+
+Next: AirDrop the profiles you want to the device and import each in sing-box
+      (Profiles > New Profile > Import). The composite (every tunnel) and the
+      .list. groups (one server's, or the warped ones) switch tunnels in the app's
+      picker without dropping the VPN; a one-tunnel profile switches by switching
+      profiles. They hold private keys: delete the copies you send.
+--- stderr
+### rebuild-edge5 (exit 0)
+== Sweep <store>/devices/edge5
+No configs in <store>/devices/edge5/carriers: put WireGuard configs there (x.conf becomes warped.x.edge5)
+
+TUNNEL                                   FILE       
+warp.edge5                               unchanged  (WARP alone, a plain tunnel)
+nord.us1.edge5                           manual     
+nord.us2.edge5                           manual     
+
+== Profiles in <store>/devices/edge5/sing-box
+nord.us1.edge5.json                              unchanged
+nord.us2.edge5.json                              unchanged
+warp.edge5.json                                  unchanged
+edge5.json                                       unchanged
+nord.list.edge5.json                             unchanged
+(not checked: sing-box isn't installed on this Mac)
+
+Next: AirDrop the profiles you want to the device and import each in sing-box
+      (Profiles > New Profile > Import). The composite (every tunnel) and the
+      .list. groups (one server's, or the warped ones) switch tunnels in the app's
+      picker without dropping the VPN; a one-tunnel profile switches by switching
+      profiles. They hold private keys: delete the copies you send.
+--- stderr
+### list (exit 0)
+DEVICE               CARRIERS  TUNNELS  WARP  PROFILES
+edge1 (this Mac)     7         12       yes   13
+edge2                0         2        no    0
+edge3                0         1        no    0
+edge4                0         1        no    0
+edge5                0         3        yes   5
+--- stderr
+### sweep-baddir (exit 1)
+--- stderr
+wgwarp-sweep.sh: no folder /nonexistent
+### build-nodev (exit 1)
+--- stderr
+singbox.sh: no device <store>/devices/nosuchdevice (<scripts>/singbox.sh new nosuchdevice)

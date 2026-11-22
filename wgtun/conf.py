@@ -8,6 +8,10 @@ import re
 from typing import Callable, Dict, List
 
 
+class Error(Exception):
+    """A reason to stop, said once by the script's main() (store re-exports it)."""
+
+
 class Conf:
     def __init__(self, text: str, path: str = "") -> None:
         self.path = path
@@ -15,13 +19,15 @@ class Conf:
         lines = text.split("\n")
         if lines and lines[-1] == "":
             lines.pop()
-        self.raw = lines                                # as in the file (CR kept)
         self.lines = [ln[:-1] if ln.endswith("\r") else ln for ln in lines]
 
     @classmethod
     def read(cls, path: str) -> Conf:
-        with open(path, newline="") as f:
-            return cls(f.read(), path)
+        try:
+            with open(path, newline="") as f:
+                return cls(f.read(), path)
+        except UnicodeDecodeError:
+            raise Error(f"{path}: not UTF-8 text") from None
 
     def values(self, key: str) -> List[str]:
         """Every <key> line's value: all after the first "=" (base64 keys end in "=")."""
