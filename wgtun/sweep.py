@@ -161,11 +161,11 @@ def resolve(arg: str) -> str:
         mac = store.this_mac()
         if not mac:
             raise Error("no default device yet: tunnel.sh default (or give a device or folder)")
-        folder = os.path.join(store.devices_dir(), mac)
+        folder = store.device_dir(mac)
     elif "/" in arg or arg in (".", ".."):
         folder = arg
     else:
-        folder = os.path.join(store.devices_dir(), arg)
+        folder = store.device_dir(arg)
         if not os.path.isdir(folder):
             folder = arg
     if not os.path.isdir(folder):

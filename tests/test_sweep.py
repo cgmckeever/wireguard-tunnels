@@ -164,3 +164,13 @@ def test_warp_alone_without_a_profile_is_an_orphan(store, capsys):
     assert "warp.ph                                  orphan     (no warp/wgcf-profile.conf: left in place)" \
         in capsys.readouterr().out
     assert s.written() == []
+
+
+def test_a_non_utf8_config_is_one_line(store, capsys):
+    """Not only carriers: the sweep compares what it writes with config/'s copy."""
+    store.device("ph")
+    store.put("devices/ph/carriers/srv.conf", client("srv"))
+    with open(store.put("devices/ph/config/warped.srv.ph.conf", ""), "wb") as f:
+        f.write(b"\xff")
+    run(store, "ph")
+    assert store.read("devices/ph/config/warped.srv.ph.conf").startswith("[Interface]")   # replaced, no traceback

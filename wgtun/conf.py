@@ -23,11 +23,7 @@ class Conf:
 
     @classmethod
     def read(cls, path: str) -> Conf:
-        try:
-            with open(path, newline="") as f:
-                return cls(f.read(), path)
-        except UnicodeDecodeError:
-            raise Error(f"{path}: not UTF-8 text") from None
+        return cls(read_text(path), path)
 
     def values(self, key: str) -> List[str]:
         """Every <key> line's value: all after the first "=" (base64 keys end in "=")."""
@@ -81,6 +77,15 @@ class Conf:
             key = next((k for k in edits if is_key(line, k)), None)
             out += edits[key](line) if key else [line]
         return "".join(ln + "\n" for ln in out)
+
+
+def read_text(path: str) -> str:
+    """A file as text, line ends as they are; one that isn't UTF-8 is an Error naming it."""
+    try:
+        with open(path, newline="") as f:
+            return f.read()
+    except UnicodeDecodeError:
+        raise Error(f"{path}: not UTF-8 text") from None
 
 
 def is_key(line: str, key: str) -> bool:

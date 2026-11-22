@@ -3,6 +3,7 @@ rules every tunnel follows."""
 
 from __future__ import annotations
 
+import contextlib
 import locale
 import os
 import re
@@ -10,7 +11,7 @@ import sys
 import tempfile
 from typing import Callable, Dict, Iterable, List, NoReturn
 
-from .conf import Conf, Error
+from .conf import Conf, Error, read_text
 
 KEEPALIVE = 25                       # seconds: every one-tunnel config has one
 WARP_ENDPOINT = "162.159.192.1:2408"  # Cloudflare's, unless .warp-endpoint says otherwise
@@ -21,8 +22,8 @@ SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 
 
 # What a main() reports as one line instead of a traceback: its own reasons
-# (a config that isn't UTF-8 is one: conf.Conf.read) and a file it can't read
-# or write (permissions, a race)
+# (a file that isn't UTF-8 is one: conf.read_text) and a file it can't read or
+# write (permissions, a race)
 FAILURES = (Error, OSError)
 
 
@@ -50,19 +51,23 @@ class Folder:
         self.warp = os.path.join(path, "warp")               # its wgcf WARP account and profile
         self.profile = os.path.join(self.warp, "wgcf-profile.conf")
         self.sing_box = os.path.join(path, "sing-box")       # singbox.sh build's
+        self.exports = os.path.join(path, "exports")         # WireGuard app exports (tunnel.sh extract)
+        # What holds private keys (as their folders do: 0700, files 0600)
+        self.private = (self.carriers, self.config, self.warp, self.exports, self.sing_box)
 
     @classmethod
     def of(cls, device: str) -> Folder:
-        return cls(os.path.join(devices_dir(), device))
+        return cls(device_dir(device))
+
+
+def device_dir(device: str) -> str:
+    return os.path.join(devices_dir(), device)
 
 
 def this_mac() -> str:
     """This Mac's device (tunnel.sh default), or ""."""
-    try:
-        with open(os.path.join(devices_dir(), ".default")) as f:
-            return f.read().strip()
-    except OSError:
-        return ""
+    path = os.path.join(devices_dir(), ".default")
+    return read_text(path).strip() if os.path.isfile(path) else ""
 
 
 def collated(items: Iterable[str]) -> List[str]:
@@ -104,8 +109,7 @@ def warp_endpoint(device_dir: str) -> str:
     elsewhere (a router whose own WARP holds a route to it)."""
     for f in (os.path.join(device_dir, ".warp-endpoint"), os.path.join(root(), ".warp-endpoint")):
         if os.path.isfile(f):
-            with open(f) as fh:
-                ep = re.sub(r"[ \t\r\n]", "", fh.read())
+            ep = re.sub(r"[ \t\r\n]", "", read_text(f))
             if not re.fullmatch(r"[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+", ep):
                 raise Error(f"{f}: IPv4:port, e.g. {WARP_ENDPOINT} (not {ep})")
             return ep
@@ -147,8 +151,8 @@ def state_of(path: str, text: str) -> str:
     """What writing text to path would be: new, updated or unchanged."""
     if not os.path.isfile(path):
         return "new"
-    with open(path, newline="") as f:
-        return "unchanged" if f.read() == text else "updated"
+    with open(path, "rb") as f:
+        return "unchanged" if f.read() == text.encode() else "updated"
 
 
 def write_private(path: str, text: str) -> None:
@@ -168,6 +172,16 @@ def private_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
     os.chmod(path, 0o700)
 
+
+
+def readable(paths: List[str]) -> List[Conf]:
+    """Another device's configs, less any it can't read: that device's own
+    sweep, build and check say so, not this one's."""
+    out = []
+    for p in paths:
+        with contextlib.suppress(*FAILURES):
+            out.append(Conf.read(p))
+    return out
 
 
 def check_keys(device: str, used: List[Conf], note: Callable[[str], None]) -> None:
@@ -194,7 +208,7 @@ def check_keys(device: str, used: List[Conf], note: Callable[[str], None]) -> No
             continue
         f = Folder.of(name)
         paths = files_in(f.carriers) + files_in(f.config) + ([f.profile] if os.path.isfile(f.profile) else [])
-        others += [f"  {mine[k]} and {label}" for k, label in keyed([Conf.read(p) for p in paths]) if k in mine]
+        others += [f"  {mine[k]} and {label}" for k, label in keyed(readable(paths)) if k in mine]
     if others:
         raise Error("same private key in:\n" + "\n".join(others)
                     + "\neach config needs its own (make a new one for this device)")

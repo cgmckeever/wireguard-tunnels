@@ -102,4 +102,24 @@ def test_one_bad_device_doesnt_stop_the_rest(store, capsys):
     out = capsys.readouterr().out
     assert "nosuch\n  error: no device nosuch" in out
     assert f"error: {path}: not UTF-8 text" in out
-    assert out.endswith("errors in 2 devices\n")
+    assert out.count("not UTF-8 text") == 1          # once, on its own device
+    assert out.endswith("2 errors in 2 devices\n")
+
+
+def test_a_folder_it_cant_read(store, capsys):
+    built_phone(store)
+    os.chmod(store.path("devices/ph/carriers"), 0)
+    try:
+        assert check.main(["ph"]) == 1
+    finally:
+        os.chmod(store.path("devices/ph/carriers"), 0o700)
+    assert "  error: [Errno 13] Permission denied" in capsys.readouterr().out
+
+
+def test_a_bad_file_is_its_own_devices_problem(store, capsys):
+    built_phone(store)
+    store.device("tv", carriers=False, warp=False)
+    store.put("devices/tv/config/srv.tv.conf", client("tv"))
+    with open(store.put("devices/ph/config/bad.ph.conf", ""), "wb") as f:
+        f.write(b"\xff")
+    assert check.check_device("tv") == []

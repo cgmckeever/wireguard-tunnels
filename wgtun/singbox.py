@@ -159,7 +159,7 @@ class Device(store.Folder):
             raise Error(f"a device name, please (singbox.sh {verb} <device>)")
         if not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", name):
             raise Error("device names are letters, digits, . _ - (not starting with .)")
-        super().__init__(os.path.join(store.devices_dir(), name))
+        super().__init__(store.device_dir(name))
         self.setup = "install.sh" if name == store.this_mac() else f"{HERE} new {name}"
 
 
