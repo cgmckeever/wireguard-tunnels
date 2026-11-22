@@ -51,6 +51,7 @@ def swept_ok(conf: str, warp_host: str) -> subprocess.CompletedProcess:
 
 @pytest.mark.parametrize("line,on", [("PersistentKeepalive = 25", True), ("persistentkeepalive=25\r", True),
                                      ("PersistentKeepalive = 0", False), ("PersistentKeepalive = off", False),
+                                     ("PersistentKeepalive = 00", False), ("PersistentKeepalive = Off", False),
                                      ("", False)])
 def test_has_keepalive_as_wgtun_reads_it(tmp_path, line, on):
     path = tmp_path / "t.conf"
