@@ -8,7 +8,7 @@
 #   wgtun.sh <script> -h           that script's own usage
 #   wgtun.sh -h                    this list
 #
-# <script> is tunnel, singbox, nord or qr (".sh" optional). Each runs exactly
+# <script> is tunnel, singbox, nord, qr or check (".sh" optional). Each runs exactly
 # as it would by its own path.
 
 set -euo pipefail
@@ -27,6 +27,7 @@ TOOLS=(
     "singbox|Devices on sing-box (iPhone, Apple TV...): new, build, list"
     "nord|A NordVPN config for a device (carrier or config) or a server (an exit)"
     "qr|A device's tunnel as a QR code, to scan into the WireGuard app"
+    "check|Is the store as the scripts leave it? configs, keys, keepalives, profiles"
 )
 
 list() {

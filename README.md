@@ -160,7 +160,7 @@ for 2.
 
 | Step | `install.sh` | `--sing-box` |
 |------|--------------|--------------|
-| Homebrew packages | `wireguard-tools` (`wg`, `wg-quick`, `wireguard-go`), `wgcf` (WARP accounts), `jq` (sing-box profiles, `nord.sh`), `qrencode` ([qr.sh](#a-tunnel-as-a-qr-code)) | `wgcf`, `jq`, `qrencode` |
+| Homebrew packages | `wireguard-tools` (`wg`, `wg-quick`, `wireguard-go`), `wgcf` (WARP accounts), `jq` (`nord.sh`), `qrencode` ([qr.sh](#a-tunnel-as-a-qr-code)) | `wgcf`, `jq`, `qrencode` |
 | Folders | This Mac's device, `~/wg-tunnels/devices/<mac>/`; writes `<mac>` to `.default` | A first device, `~/wg-tunnels/devices/<device>/` (`singbox.sh new`) |
 | WARP | Registers a free WARP account for this Mac (`wgcf register`, which accepts Cloudflare's terms of service) and writes `$(brew --prefix)/etc/wireguard/warp.conf` from it | The first device's own account |
 | Daemon | Installs `/usr/local/sbin/wg-tunnels` (a copy of `tunnel.sh`) and the `com.local.wg-tunnels` LaunchDaemon, using `sudo`, when the repo copy differs or the LaunchDaemon is missing | none |
@@ -279,8 +279,9 @@ device's WARP account from `warp/`, with no carrier, on the same
 [endpoint](#warp-endpoint) as the warped tunnels. It's a plain tunnel: on
 this Mac `tunnel.sh import` takes it as a full tunnel (in the menu under
 OTHER), and it shares the WARP key safely because the daemon runs one tunnel
-at a time. It also works in the WireGuard app. sing-box doesn't use it:
-`build` makes `warp.<device>` from `warp/` directly. `singbox.sh new` runs the sweep
+at a time. It also works in the WireGuard app, and `build` makes sing-box's
+`warp.<device>` from it, so WARP is the same everywhere. It has
+`PersistentKeepalive = 25`, as every one-tunnel config should. `singbox.sh new` runs the sweep
 too, so a new device has its `warp.<device>.conf` right away; on this Mac,
 `import` rewrites it every time (new keys after `rotate-warp`, a new
 [endpoint](#warp-endpoint)).
@@ -292,7 +293,9 @@ there are several, one is used and the rest are reported as skipped. A carrier
 that isn't a one-peer WireGuard config is skipped too. Other files in
 `config/` are left alone: a
 `warped.*` file whose carrier is gone is reported as an *orphan* (delete it
-yourself), anything else (a plain tunnel) as *manual*.
+yourself), anything else (a plain tunnel) as *manual*. A carrier the sweep
+can't use is skipped with the reason (`2 [Peer] sections, needs one`, say): it
+needs what [build](#what-build-accepts-and-writes) needs.
 
 ### Extras
 
@@ -766,7 +769,7 @@ change.
 | Command | What |
 |---------|------|
 | `new <device>` | Make `~/wg-tunnels/devices/<device>/` (or add to one that exists), register the device's own WARP account (needs `wgcf`), and write `config/warp.<device>.conf` (WARP alone, for the WireGuard app) |
-| `build <device>` | Sweep its carriers, then write its profiles into its `sing-box/` (needs `jq`) |
+| `build <device>` | Sweep its carriers, then write its profiles into its `sing-box/` |
 | `list` | Each device's carriers, tunnels and profiles, whether it has a WARP account, and which is this Mac |
 
 ### sing-box on this Mac
@@ -865,9 +868,56 @@ first creates `~/wg-tunnels`, and both read its location from `$WG_TUNNELS`
 `# wireguard-tools client: <config> on <server>`. They're wgt-ctl's to
 replace: the live copy is on the server, and `wgt-ctl sync` puts it back.
 Nothing here changes, renames or deletes one. `tunnel.sh extract` leaves them
-in place (the WireGuard app's export drops that line), and the sweep stops
-rather than write a warped tunnel over one.
+in place (the WireGuard app's export drops that line). The sweep writes only
+`warped.*` and `warp.<device>.conf`, names wireguard-tools never gives a file
+(it names its own `<server>.<config>.conf` and leaves `warped.*` alone), so
+the two can't write over each other. A warped tunnel made from a
+wireguard-tools carrier keeps its `# wireguard-tools client:` line; that's
+fine, both sides go by the name.
+
+**Who writes what in `config/`.** It's the one copy every consumer reads: the
+WireGuard app ([qr.sh](#a-tunnel-as-a-qr-code)), `tunnel.sh import` and
+`singbox.sh build`. So a tunnel's settings, its keepalive included, are
+decided once, where the file is written (wireguard-tools, `nord.sh` and the
+sweep each write `PersistentKeepalive = 25`), and every consumer passes them
+through. The one exception is a sing-box group, which drops keepalives
+because it runs every tunnel at once.
 
 **Backups.** When wgt-ctl replaces or removes a config, the old one becomes
 `<name>.conf.<time>.bak`. Everything here reads only `*.conf`, so backups are
 never listed, imported or built. Delete them when you no longer need them.
+
+## Checking the store
+
+`scripts/check.sh` (or `wgtun.sh check`) reads every device, or the ones you
+name, and changes nothing:
+
+- every config in `carriers/`, `config/` and `warp/` is one build can use,
+  every file is 0600 and every folder 0700;
+- no private key is on two devices (two devices on one key knock each other off);
+- every `config/` tunnel has a keepalive (a warning: one without has none in
+  the WireGuard app, `tunnel.sh` or sing-box either);
+- `config/`'s `warped.*` and `warp.<device>.conf` are what the sweep writes
+  now, and `sing-box/` is what `build` writes now: it says which to run when
+  they aren't.
+
+It exits 1 on an error, so it can gate a script.
+
+## Developing
+
+The sweep, `singbox.sh` and `check.sh` are Python in `wgtun/` (stdlib only,
+Python 3.9 or later: macOS's own `python3` does), behind the same script
+names. `tunnel.sh`, `nord.sh`, `qr.sh` and `install.sh` stay shell:
+`tunnel.sh` is the root daemon, installed as one file.
+
+| File | What |
+|------|------|
+| `wgtun/conf.py` | A WireGuard config: values read as `wg-quick` reads them, line rewrites |
+| `wgtun/store.py` | The store's folders and names, the WARP endpoint, the shared numbers (keepalive, MTUs) |
+| `wgtun/sweep.py` | `wgwarp-sweep.sh` |
+| `wgtun/singbox.py` | `singbox.sh` |
+| `wgtun/check.py` | `check.sh` |
+
+`./test.sh` runs the tests (each builds its own store in a temp folder, with
+fake keys); `./test.sh lint` runs ruff and mypy; `./test.sh all` both. The
+first run makes `.venv/` with pytest, ruff and mypy.

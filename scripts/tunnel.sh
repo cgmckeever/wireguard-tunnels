@@ -371,7 +371,9 @@ cmd_import_root() {
         tmp=$(tmpfile import)
         render "$f" "$kind" "$wep" "$ip" > "$tmp"
         # WARP alone: a keepalive, as WARP has inside a warped tunnel. It
-        # handshakes at once, and a stale handshake means trouble (the watchdog)
+        # handshakes at once, and a stale handshake means trouble (the watchdog).
+        # The sweep's warp.<device>.conf has one already: this is for a folder
+        # imported from elsewhere.
         if [ "$(conf_val "$f" PrivateKey)" = "$(conf_val "$WARP_SRC" PrivateKey)" ] \
             && ! grep -qi '^[[:space:]]*PersistentKeepalive' "$tmp"; then
             sed -i '' -E 's/^([[:space:]]*Endpoint[[:space:]]*=.*)$/\1\

@@ -3,3 +3,10 @@
 *.zip
 *.toml
 .DS_Store
+
+# The test and lint tools (test.sh makes it)
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

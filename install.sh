@@ -28,8 +28,8 @@
 #   --no-daemon   Skip the daemon step (e.g. Ansible runs it separately with
 #                 become: scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>)
 #   --sing-box [--device <name>]
-#                 Only what building sing-box profiles needs (singbox.sh): wgcf,
-#                 jq (and qrencode, for qr.sh), ~/wg-tunnels/devices and a first device (asked, or
+#                 Only what building sing-box profiles needs (singbox.sh): wgcf
+#                 (and jq for nord.sh, qrencode for qr.sh), ~/wg-tunnels/devices and a first device (asked, or
 #                 --device; singbox.sh new makes more). No Local Mac Tunnels: no
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
 #                 without --sing-box to add Local Mac Tunnels later
@@ -100,7 +100,7 @@ BREW_PREFIX="$(brew --prefix)"
 ok "brew ($BREW_PREFIX)"
 
 # wireguard-tools brings wg, wg-quick, wireguard-go and the bash wg-quick needs
-# (Local Mac Tunnels); wgcf makes WARP accounts; jq writes sing-box profiles;
+# (Local Mac Tunnels); wgcf makes WARP accounts; jq reads Nord's API (nord.sh);
 # qrencode shows a tunnel as a QR for the WireGuard app (scripts/qr.sh)
 pkgs="wireguard-tools wgcf jq qrencode"
 [ "$singbox_only" = 1 ] && pkgs="wgcf jq qrencode"
@@ -160,14 +160,9 @@ fi
 DEV_DIR="$DEVICES/$device"
 WARP_DIR="$DEV_DIR/warp"
 # The WARP endpoint: <device>/.warp-endpoint, else ~/wg-tunnels/.warp-endpoint
-# (one line, IPv4:port), else Cloudflare's default. Files, not a variable, so
-# the sweep and singbox.sh read the same ones.
-WARP_ENDPOINT=162.159.192.1:2408 ep_file=""
-for f in "$DEV_DIR/.warp-endpoint" "$TUNNELS_DIR/.warp-endpoint"; do
-    [ -f "$f" ] && { ep_file="$f"; WARP_ENDPOINT=$(tr -d ' \t\r\n' < "$f"); break; }
-done
-[[ "$WARP_ENDPOINT" =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+$ ]] \
-    || die "${ep_file}: IPv4:port, e.g. 162.159.192.1:2408 (not $WARP_ENDPOINT)"
+# (one line, IPv4:port), else Cloudflare's default. Read by the same code as
+# the sweep's (wgtun/store.py), so this Mac's WARP and its config/ agree.
+WARP_ENDPOINT=$(PYTHONPATH="$REPO" python3 -m wgtun.store warp-endpoint "$DEV_DIR") || exit 1
 
 umask 077    # until warp.conf is written: everything here holds private keys
 # 0700: everything under ~/wg-tunnels holds private keys
