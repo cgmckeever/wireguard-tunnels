@@ -192,12 +192,14 @@ put() {
 }
 
 # conf_vals <file> <key>: every value of key (any case), everything after
-# the first "=" (so a base64 key keeps its "=" padding), CR line ends dropped
+# the first "=" (so a base64 key keeps its "=" padding) up to a "#" (wg-quick
+# drops a comment), CR line ends dropped: as wgtun's conf.py reads them
 conf_vals() {
     awk -v k="$2" '
         { line = $0; sub(/\r$/, "", line) }
         tolower(line) ~ "^[[:space:]]*" tolower(k) "[[:space:]]*=" {
             v = substr(line, index(line, "=") + 1)
+            sub(/#.*/, "", v)
             gsub(/^[[:space:]]+|[[:space:]]+$/, "", v)
             print v
         }' "$1"

@@ -43,6 +43,8 @@ def test_carrier_without_allowed_ips_gets_one(tmp_store):
     ("10.9.8.0/24", "kept"), ("10.0.0.5", "kept"), ("fd00:1::/48", "kept"),
     ("10.0.0.0/4", "wide"), ("fd00::/8", "wide"),
     ("300.1.1.1", "bad"), ("vpn.example.net", "bad"), ("10.0.0.0/33", "bad"),
+    (":", "bad"), ("::::", "bad"), ("1:2:3:4:5:6:7:8:9:a:b", "bad"),
+    ("10.0.0.0/8", "kept"), ("10.0.0.0/7", "wide"), ("fd00::/16", "kept"), ("fc00::/15", "wide"),
 ])
 def test_extras_verdict(entry, verdict):
     assert sweep.verdict(entry) == verdict
@@ -142,13 +144,11 @@ def test_cli(tmp_store, capsys):
     assert sweep.main(["-h"]) == 0
     assert capsys.readouterr().out.startswith("wgwarp-sweep.sh — ")
     for args in (["-x"], ["a", "b"]):
-        with pytest.raises(SystemExit):
-            sweep.main(args)
+        assert sweep.main(args) == 1
         assert "usage: wgwarp-sweep.sh" in capsys.readouterr().err
     tmp_store.device("ph")
     path = tmp_store.put("devices/ph/carriers/srv.conf", b"\xff\xfe")
-    with pytest.raises(SystemExit):
-        sweep.main(["ph"])
+    assert sweep.main(["ph"]) == 1
     assert capsys.readouterr().err == f"wgwarp-sweep.sh: {path}: not UTF-8 text\n"     # a line, not a traceback
 
 
@@ -163,7 +163,7 @@ def test_warp_alone_without_a_profile_is_an_orphan(tmp_store, capsys):
     assert s.written() == []
 
 
-def test_a_non_utf8_config_is_one_line(tmp_store, capsys):
+def test_a_non_utf8_config_is_replaced(tmp_store, capsys):
     """Not only carriers: the sweep compares what it writes with config/'s copy."""
     tmp_store.device("ph")
     tmp_store.put("devices/ph/carriers/srv.conf", client("srv"))

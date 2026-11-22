@@ -19,8 +19,7 @@ def test_warp_endpoint(tmp_store, capsys):
     dev = tmp_store.path(tmp_store.device("mac"))
     assert run(capsys, "warp-endpoint", dev) == "162.159.192.1:2408\n"
     tmp_store.put("devices/mac/.warp-endpoint", "engage.cloudflareclient.com:2408")
-    with pytest.raises(SystemExit):
-        forinstall.main(["warp-endpoint", dev])
+    assert forinstall.main(["warp-endpoint", dev]) == 1
     err = capsys.readouterr().err
     assert err.startswith("install.sh: ") and "IPv4:port" in err
 
@@ -31,6 +30,9 @@ def test_folders(tmp_store, capsys):
     assert run(capsys, "folders", devices, new) == f"  ok       {devices}\n  changed  {new}\n"
     assert stat.S_IMODE(os.stat(new).st_mode) == 0o700
     assert run(capsys, "folders", new) == f"  ok       {new}\n"
+    os.chmod(new, 0o755)
+    assert run(capsys, "folders", new) == f"  changed  {new}\n"         # tightened
+    assert stat.S_IMODE(os.stat(new).st_mode) == 0o700
 
 
 def test_warp_account(tmp_store, capsys, fake_wgcf):
@@ -56,15 +58,13 @@ def test_daemon_warp(tmp_store, capsys, fake_wgcf, tmp_path):
 
 def test_daemon_warp_refuses_what_the_sweep_would_skip(tmp_store, capsys, tmp_path):
     tmp_store.put("devices/mac/warp/wgcf-profile.conf", "[Interface]\nPrivateKey = x\n")
-    with pytest.raises(SystemExit):
-        forinstall.main(["daemon-warp", tmp_store.path("devices/mac"), str(tmp_path / "w.conf")])
+    assert forinstall.main(["daemon-warp", tmp_store.path("devices/mac"), str(tmp_path / "w.conf")]) == 1
     assert "wgcf-profile.conf: 0 [Peer] sections, needs one" in capsys.readouterr().err
 
 
 @pytest.mark.parametrize("args", [[], ["nope", "x"], ["warp-endpoint"], ["daemon-warp", "a"], ["folders"]])
 def test_usage(args, capsys):
-    with pytest.raises(SystemExit):
-        forinstall.main(args)
+    assert forinstall.main(args) == 1
     assert capsys.readouterr().err.startswith("install.sh: usage: python3 -m wgtun.forinstall ")
 
 

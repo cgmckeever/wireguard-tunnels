@@ -12,7 +12,7 @@ import stat
 import subprocess
 import sys
 import tempfile
-from typing import Callable, Dict, Iterable, List, NoReturn, Optional, Tuple
+from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from .conf import Conf, Error, read_text, stem
 
@@ -20,6 +20,7 @@ KEEPALIVE = 25                       # seconds: every one-tunnel config has one
 WARP_ENDPOINT = "162.159.192.1:2408"  # Cloudflare's, unless .warp-endpoint says otherwise
 WARP_MTU = 1280                      # wgcf's, and IPv6's minimum
 WARP_OVERHEAD = 80                   # what a carrier adds to each WARP packet
+WIDEST_V4, WIDEST_V6 = 8, 16          # a carrier's extras: wider would take traffic from WARP
 PLAIN_MTU = 1420                     # wg-quick's default
 WARPED = "warped."                   # the name of a tunnel that carries WARP starts with it
 SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "scripts")
@@ -30,11 +31,6 @@ SCRIPTS = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 FAILURES = (Error, OSError)
 
 
-def die(prog: str, msg: str) -> NoReturn:
-    print(f"{prog}: {msg}", file=sys.stderr)
-    sys.exit(1)
-
-
 def run_main(prog: str, body: Callable[[], Optional[int]]) -> int:
     """A script's main(): umask 077 (everything here holds private keys), and
     a failure as one line, "<prog>: <why>"."""
@@ -42,7 +38,8 @@ def run_main(prog: str, body: Callable[[], Optional[int]]) -> int:
     try:
         return body() or 0
     except FAILURES as e:
-        die(prog, str(e))
+        print(f"{prog}: {e}", file=sys.stderr)
+        return 1
 
 
 # --- where things are ---
@@ -160,11 +157,11 @@ def sweep_owned(name: str, device: str) -> bool:
     return is_warped(name) or name == warp_alone(device)
 
 
-def warp_endpoint(device_dir: str) -> str:
+def warp_endpoint(folder: str) -> str:
     """IPv4:port from <device>/.warp-endpoint, else <store>/.warp-endpoint, else
     Cloudflare's: per device for one whose network routes the shared address
     elsewhere (a router whose own WARP holds a route to it)."""
-    for f in (os.path.join(device_dir, ".warp-endpoint"), os.path.join(root(), ".warp-endpoint")):
+    for f in (os.path.join(folder, ".warp-endpoint"), os.path.join(root(), ".warp-endpoint")):
         if os.path.isfile(f):
             ep = re.sub(r"[ \t\r\n]", "", read_text(f))
             if not re.fullmatch(r"[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+", ep):
@@ -277,7 +274,7 @@ def key_clashes(device: str, used: List[Conf]) -> Tuple[str, str]:
         else:
             mine[key] = label
     others = [f"  {mine[k]} and {label}" for name in all_devices() if name != device
-              for k, label in keyed(_readable(Folder.of(name).confs())) if k in mine]
+              for k, label in keyed(_readable(name)) if k in mine]
     error = ("same private key in:\n" + "\n".join(others)
              + "\neach config needs its own (make a new one for this device)") if others else ""
     note = ("note: same private key in (fine on one device: one tunnel at a time):\n"
@@ -285,9 +282,12 @@ def key_clashes(device: str, used: List[Conf]) -> Tuple[str, str]:
     return error, note
 
 
-def _readable(paths: List[str]) -> Iterable[Conf]:
-    """Another device's configs, less any it can't read: that device's own
-    sweep, build and check say so, not this one's."""
-    for p in paths:
-        with contextlib.suppress(*FAILURES):
-            yield Conf.read(p)
+def _readable(device: str) -> List[Conf]:
+    """Another device's configs, less any it can't read (a file, or a folder):
+    that device's own sweep, build and check say so, not this one's."""
+    out: List[Conf] = []
+    with contextlib.suppress(*FAILURES):
+        for p in Folder.of(device).confs():
+            with contextlib.suppress(*FAILURES):
+                out.append(Conf.read(p))
+    return out

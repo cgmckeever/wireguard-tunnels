@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 
-from wgtun import check, singbox
+from wgtun import check, singbox, sweep
 
 from .conftest import client
 
@@ -139,3 +139,16 @@ def test_what_the_sweep_skips_is_a_warning(tmp_store):
     assert ("warning", "warped.srv.ph: skipped, warped.srv.conf: another carrier already makes warped.srv.ph") in found
     assert ("warning", "config/warped.gone.ph.conf: an orphan (no usable carrier in carriers/): "
                        "delete it if that's for good") in found
+
+
+def test_another_devices_unreadable_folder(tmp_store):
+    """Its own check says so; this device builds and checks clean."""
+    built_phone(tmp_store)
+    tmp_store.device("tv", carriers=False, warp=False)
+    os.chmod(tmp_store.path("devices/tv/config"), 0)
+    try:
+        assert check.check_device("ph") == []
+        singbox.plan(singbox.Device("ph", "build"), sweep.Sweep(tmp_store.path("devices/ph"), app_column=False),
+                     check.quiet)
+    finally:
+        os.chmod(tmp_store.path("devices/tv/config"), 0o700)

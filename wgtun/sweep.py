@@ -20,8 +20,8 @@ singbox.sh build makes its warp.<device> from it).
 
 A config/ file is only rewritten when the new one differs. The sweep owns
 warped.* and warp.<device>.conf; every other config/ file is left as it is.
-Everything WARP-specific about a tunnel is done here: tunnel.sh import and
-singbox.sh build only check it.
+Everything WARP-specific about a config is done here; tunnel.sh import checks
+it, and singbox.sh build makes its sing-box form (the detour, the inner MTU).
 
 A carrier's AllowedIPs beyond the WARP endpoint come from its header lines:
   # device-network: 10.9.8.0/24     (the wireguard-tools server repo writes this)
@@ -45,12 +45,13 @@ The WARP endpoint comes from <device>/.warp-endpoint, else
 
 from __future__ import annotations
 
+import ipaddress
 import os
 import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, TextIO
+from typing import Dict, List, Optional
 
 from . import store
 from .conf import Conf, stem
@@ -74,9 +75,6 @@ class Row:
 
 # --- a carrier's extras: the networks it takes besides the WARP endpoint ---
 
-V4 = re.compile(r"[0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?")
-V6 = re.compile(r"[0-9A-Fa-f]*:[0-9A-Fa-f:.]*(/[0-9]{1,3})?")
-
 
 def extras(carrier: Conf) -> Dict[str, List[str]]:
     """The entries on its device-network and tunnel-routes lines, by verdict:
@@ -91,18 +89,14 @@ def extras(carrier: Conf) -> Dict[str, List[str]]:
 
 
 def verdict(e: str) -> str:
-    """kept, wide (wider than /8, /16 for IPv6: it would take traffic away
-    from WARP) or bad (not an address). tunnel.sh swept_ok has the same limits."""
-    if V4.fullmatch(e):
-        if any(int(o) > 255 for o in e.split("/")[0].split(".")):
-            return "bad"
-        least, most = 8, 32
-    elif V6.fullmatch(e):
-        least, most = 16, 128
-    else:
+    """kept, wide (wider than store.WIDEST_V4/_V6: it would take traffic away
+    from WARP) or bad (not an address or network). tunnel.sh swept_ok has the
+    same limits."""
+    try:
+        net = ipaddress.ip_network(e, strict=False)
+    except ValueError:
         return "bad"
-    bits = int(e.split("/", 1)[1]) if "/" in e else most
-    return "bad" if bits > most else "wide" if bits < least else "kept"
+    return "wide" if net.prefixlen < (store.WIDEST_V4 if net.version == 4 else store.WIDEST_V6) else "kept"
 
 
 def carrier_notes(carrier: Conf, found: Dict[str, List[str]], warp_mtu: int) -> List[str]:
@@ -113,7 +107,7 @@ def carrier_notes(carrier: Conf, found: Dict[str, List[str]], warp_mtu: int) -> 
         ("bad", "ignored, not an address: {}")) if found[v]]
     # WARP needs 1280 inside (IPv6's minimum): a carrier too small for that
     # plus its overhead makes tunnel.sh and singbox.sh run WARP smaller
-    mtu = carrier.number("MTU", 0)
+    mtu = carrier.mtu(0)
     inner = store.inner_mtu(mtu, warp_mtu)
     if mtu and inner < warp_mtu:
         notes.append(f"carrier MTU {mtu}: WARP runs at {inner} inside (IPv6 and QUIC fall back)")
@@ -249,24 +243,23 @@ class Sweep:
         store.private_dir(self.f.dir)
         store.private_dir(self.f.config)
         if not self.no_carriers:
-            os.chmod(self.f.carriers, 0o700)
+            store.private_dir(self.f.carriers)
         for r in self.written():
             store.update_private(r.path, r.text)
 
-    def report(self, no_next: bool = False, out: Optional[TextIO] = None) -> None:
+    def report(self, no_next: bool = False) -> None:
         """The table: each tunnel, what happened to its file, and for this
         Mac the WireGuard app column."""
-        out = out or sys.stdout
 
-        def say(*cols: str) -> None:
-            print(f"{cols[0]:<40} {cols[1]:<10} {cols[2] if len(cols) > 2 else ''}", file=out)
+        def say(name: str, state: str, last: str) -> None:
+            print(f"{name:<40} {state:<10} {last}")
 
         if self.no_carriers:
             print(f"No carriers/ in {self.f.dir}: plain configs only "
-                  f"(singbox.sh new {self.f.name} adds carriers/)\n", file=out)
+                  f"(singbox.sh new {self.f.name} adds carriers/)\n")
         elif not store.files_in(self.f.carriers):
             print(f"No configs in {self.f.carriers}: put WireGuard configs there "
-                  f"(x.conf becomes warped.x.{self.f.name})\n", file=out)
+                  f"(x.conf becomes warped.x.{self.f.name})\n")
         say("TUNNEL", "FILE", "WIREGUARD APP (only if you use it)" if self.app else "")
         for r in self.rows:
             if r.detail:
@@ -276,13 +269,13 @@ class Sweep:
             else:
                 say(r.name, r.state, self.app_action(r))
             for n in r.notes:
-                print(f"{'':<40} └ {n}", file=out)
+                print(f"{'':<40} └ {n}")
         if not self.app:
             return
-        print(file=out)
+        print()
         if not no_next:
-            print(f"Next: tunnel.sh import   (installs everything in {self.f.config} for the daemon)", file=out)
-        print("The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise.", file=out)
+            print(f"Next: tunnel.sh import   (installs everything in {self.f.config} for the daemon)")
+        print("The WireGuard app column is only for tunnels you also keep in the app; skip it otherwise.")
 
     def run(self, no_next: bool = False) -> None:
         self.write()

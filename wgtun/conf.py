@@ -1,5 +1,6 @@
 """A WireGuard config as its lines: values read as wg-quick reads them (keys in
-any case, CRLF ignored), and rewrites that keep every other line as it is."""
+any case, CRLF ignored, a trailing # comment dropped), and rewrites that keep
+every other line as it is."""
 
 from __future__ import annotations
 
@@ -26,8 +27,9 @@ class Conf:
         return cls(read_text(path), path)
 
     def values(self, key: str) -> List[str]:
-        """Every <key> line's value: all after the first "=" (base64 keys end in "=")."""
-        return [line.split("=", 1)[1].strip() for line in self.lines if is_key(line, key)]
+        """Every <key> line's value: all after the first "=" (base64 keys end in
+        "="), up to a "#" (wg-quick drops a comment; no key or address has one)."""
+        return [line.split("=", 1)[1].split("#", 1)[0].strip() for line in self.lines if is_key(line, key)]
 
     def value(self, key: str) -> str:
         found = self.values(key)
@@ -40,7 +42,7 @@ class Conf:
     def number(self, key: str, default: int) -> int:
         """<key> as a whole number, or default when it's missing or isn't one."""
         v = self.value(key)
-        return int(v) if v.isdigit() else default
+        return int(v) if is_number(v) else default
 
     def keepalive(self) -> int:
         """PersistentKeepalive in seconds, 0 for none (or off)."""
@@ -69,7 +71,7 @@ class Conf:
         if not re.fullmatch(r".+:[0-9]+", self.value("Endpoint")):
             return "Endpoint isn't host:port"
         mtu = self.value("MTU")
-        if mtu and not mtu.isdigit():
+        if mtu and not is_number(mtu):
             return "MTU isn't a number"
         return ""
 
@@ -97,6 +99,11 @@ def read_text(path: str) -> str:
             return f.read()
     except UnicodeDecodeError:
         raise Error(f"{path}: not UTF-8 text") from None
+
+
+def is_number(v: str) -> bool:
+    """ASCII digits only (str.isdigit takes ¹³⁰⁰, which int() refuses)."""
+    return re.fullmatch(r"[0-9]+", v) is not None
 
 
 def is_key(line: str, key: str) -> bool:

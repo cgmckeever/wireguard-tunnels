@@ -61,7 +61,7 @@ class Store:
             return f.read()
 
     def device(self, name: str, *, carriers: bool = True, warp: bool = True) -> str:
-        """devices/<name>/ as singbox.sh new leaves it."""
+        """devices/<name>/ with config/ (and carriers/ and a WARP profile, unless not)."""
         d = f"devices/{name}"
         for sub in ["", "/config"] + (["/carriers"] if carriers else []):
             os.makedirs(self.path(d + sub), mode=0o700, exist_ok=True)

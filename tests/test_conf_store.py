@@ -108,3 +108,12 @@ def test_warped_name_device_in_it_twice():
 
 def test_an_endpoint_needs_a_host():
     assert Conf(client("a", endpoint=":51820")).problem() == "Endpoint isn't host:port"
+
+
+@pytest.mark.parametrize("line,ka", [("PersistentKeepalive = 25 # every 25s", 25), ("PersistentKeepalive = ¹³", 0)])
+def test_keepalive_as_wg_quick_reads_it(line, ka):
+    assert Conf(f"[Peer]\n{line}\n").keepalive() == ka
+
+
+def test_a_number_is_ascii_digits():
+    assert Conf(client("a", mtu=1280).replace("1280", "¹²⁸⁰")).problem() == "MTU isn't a number"

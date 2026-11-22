@@ -36,7 +36,7 @@ def picks(profile: dict) -> list:
 
 
 def keepalives(profile: dict) -> dict:
-    return {ep["tag"]: ep["peers"][0].get(singbox.KEEPALIVE) for ep in profile["endpoints"]}
+    return {ep["tag"]: ep["peers"][0].get(singbox.KEEPALIVE_KEY) for ep in profile["endpoints"]}
 
 
 def test_files(phone):
@@ -180,12 +180,10 @@ def test_cli(tmp_store, capsys):
     assert singbox.main(["--help"]) == 0
     assert "singbox.sh build <device>" in capsys.readouterr().out
     for args in (["nope"], ["list", "x"], ["build", "a", "b"]):
-        with pytest.raises(SystemExit):
-            singbox.main(args)
+        assert singbox.main(args) == 1
         assert "usage: singbox.sh" in capsys.readouterr().err
     assert singbox.main([]) == 1
-    with pytest.raises(SystemExit):
-        singbox.main(["build", "bad name"])
+    assert singbox.main(["build", "bad name"]) == 1
     assert "device names are letters" in capsys.readouterr().err
 
 
@@ -216,3 +214,10 @@ def test_new(tmp_store, fake_wgcf, capsys):
     assert os.path.isfile(tmp_store.path("devices/tv/config/warp.tv.conf"))
     singbox.cmd_new("tv")
     assert capsys.readouterr().out.startswith("WARP account: already there\n")
+
+
+def test_a_name_the_composite_has_case_aside(phone):
+    """The Mac's file system ignores case: PH.json would be ph.json."""
+    phone.put("devices/ph/config/PH.conf", client("upper"))
+    with pytest.raises(Error, match="is the composite"):
+        build(phone, "ph")

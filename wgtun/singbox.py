@@ -57,7 +57,7 @@ from .store import Error
 PROG = "singbox.sh"
 HERE = os.path.join(store.SCRIPTS, "singbox.sh")
 USAGE = "usage: singbox.sh new <device> | build <device> | list (singbox.sh -h)"
-KEEPALIVE = "persistent_keepalive_interval"     # a peer's keepalive in sing-box's JSON
+KEEPALIVE_KEY = "persistent_keepalive_interval"     # a peer's keepalive in sing-box's JSON
 Say = Callable[[str, bool], None]      # say(text, to_stderr)
 
 
@@ -92,7 +92,7 @@ def endpoint(c: Conf, tag: str, mtu: int, detour: str = "") -> dict:
     if c.value("PresharedKey"):
         peer["pre_shared_key"] = c.value("PresharedKey")
     if c.keepalive():
-        peer[KEEPALIVE] = c.keepalive()
+        peer[KEEPALIVE_KEY] = c.keepalive()
     ep["peers"] = [peer]
     return ep
 
@@ -131,7 +131,7 @@ def group_profile(units: List[Unit]) -> str:
     traffic (and warped ones, sharing the device's WARP key, would knock each
     other off). The tun's MTU is the smallest, so a packet fits whichever
     tunnel is picked. A network two carriers' extras claim goes to the first."""
-    endpoints = [{**ep, "peers": [{k: v for k, v in p.items() if k != KEEPALIVE} for p in ep["peers"]]}
+    endpoints = [{**ep, "peers": [{k: v for k, v in p.items() if k != KEEPALIVE_KEY} for p in ep["peers"]]}
                  for u in units for ep in u.endpoints]
     rules, seen = [], set()
     for r in (r for u in units for r in u.rules):
@@ -235,10 +235,10 @@ def check_tags(dev: Device, made: List[Unit]) -> None:
     if dup:
         raise Error(f"more than one tunnel would be named: {' '.join(dup)} (rename the config; \"tunnel\", "
                     f"\"warp.{dev.name}\" and \"carrier.<name>\" are taken)")
-    for u in made:
-        if u.tag == dev.name:
+    for u in made:          # names compared as the Mac's file system does: case aside
+        if u.tag.lower() == dev.name.lower():
             raise Error(f"a tunnel can't be named {u.tag}: {u.tag}.json is the composite (rename the config)")
-        if u.tag.endswith(f".list.{dev.name}"):
+        if u.tag.lower().endswith(f".list.{dev.name}".lower()):
             raise Error(f"a tunnel can't be named {u.tag}: <name>.list.{dev.name} is a group profile "
                         "(rename the config)")
 

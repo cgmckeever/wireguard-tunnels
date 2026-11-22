@@ -48,7 +48,7 @@ def modes(f: store.Folder) -> Found:
         if m != 0o700:
             found.append(("error", f"{os.path.relpath(d, f.dir)}/ is {m:o}, should be 700"))
     for d in (d for d in f.private if os.path.isdir(d)):
-        for name in sorted(n for n in os.listdir(d) if n != ".DS_Store"):     # Finder's, not ours
+        for name in store.collated(n for n in os.listdir(d) if n != ".DS_Store"):     # Finder's, not ours
             path = os.path.join(d, name)
             if os.path.isfile(path) and mode(path) != 0o600:
                 found.append(("error", f"{os.path.relpath(path, f.dir)} is {mode(path):o}, should be 600"))
@@ -101,9 +101,11 @@ def up_to_date(f: store.Folder, broken: set) -> Found:
         elif r.state == "orphan":
             found.append(("warning", f"{os.path.relpath(r.path, f.dir)}: an orphan ({swept.orphan_reason(r)}): "
                                      "delete it if that's for good"))
-    error, _ = store.key_clashes(f.name, swept.configs())     # every config, wherever the device runs it
+    # Every config/ tunnel (an orphan too: the WireGuard app or tunnel.sh may
+    # still run it), not only those build makes; nothing past this is sure then
+    error, _ = store.key_clashes(f.name, swept.configs())
     if error:
-        return found + [("error", error)]                     # build would stop at it too
+        return found + [("error", error)]
     if not os.path.isdir(f.sing_box):
         return found
     built = singbox.plan(singbox.Device(f.name, "build"), swept, quiet)

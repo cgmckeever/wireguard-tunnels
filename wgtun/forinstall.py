@@ -15,7 +15,7 @@ from typing import Callable, Dict, List, Optional
 
 from . import store
 from .conf import Conf
-from .store import KEEPALIVE, WARP_MTU, Error
+from .store import KEEPALIVE, WARP_MTU, WARP_OVERHEAD, Error
 
 PROG = "install.sh"
 
@@ -42,7 +42,7 @@ def daemon_warp(device_dir: str) -> str:
 PrivateKey = {profile.value("PrivateKey")}
 Address = {", ".join(profile.items("Address"))}
 DNS = 1.1.1.1
-# IPv6's minimum: fits in a carrier of 1360 or more (tunnel.sh lowers it in a smaller one)
+# IPv6's minimum: fits in a carrier of {WARP_MTU + WARP_OVERHEAD} or more (tunnel.sh lowers it in a smaller one)
 MTU = {WARP_MTU}
 Table = off
 
