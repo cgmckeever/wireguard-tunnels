@@ -14,8 +14,8 @@
 #
 #   (default)     Local Mac Tunnels, and what Sing-Box Device Tunnels need too.
 #                 Homebrew packages wireguard-tools, wgcf, jq and qrencode;
-#                 this Mac's device folder ~/wg-tunnels/devices/<name> (asked the first time, then
-#                 kept in ~/wg-tunnels/devices/.default);
+#                 this Mac's device folder $WG_TUNNELS/devices/<name> (default
+#                 ~/wg-tunnels; asked the first time, then kept in devices/.default);
 #                 a Cloudflare WARP account and $(brew --prefix)/etc/wireguard/warp.conf;
 #                 the daemon (/usr/local/sbin/wg-tunnels + LaunchDaemon, sudo)
 #   --device <name>
@@ -34,14 +34,13 @@
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
 #                 without --sing-box to add Local Mac Tunnels later
 #
-# The WARP endpoint comes from ~/wg-tunnels/devices/<device>/.warp-endpoint,
-# else ~/wg-tunnels/.warp-endpoint (IPv4:port; default 162.159.192.1:2408).
+# The WARP endpoint comes from <store>/devices/<device>/.warp-endpoint, else
+# <store>/.warp-endpoint (IPv4:port), else Cloudflare's default.
 
 set -u
 
-REPO="$(cd "$(dirname "$0")" && pwd)"
-SELF="$REPO/install.sh"; . "$REPO/scripts/_lib.sh"   # WG_TUNNELS, DEVICES, die, usage
-DEFAULT_FILE="$DEVICES/.default"       # this Mac's device (tunnel.sh default)
+REPO=$(dirname "$(readlink -f "$0")")
+SELF="$REPO/install.sh"; . "$REPO/scripts/_lib.sh"   # WG_TUNNELS, DEVICES, DEFAULT_FILE, MAC, die, usage
 SWIFTBAR_APP="/Applications/SwiftBar.app"
 SWIFTBAR_AGENT="$HOME/Library/LaunchAgents/com.local.swiftbar.plist"
 
@@ -51,11 +50,11 @@ while [ $# -gt 0 ]; do
         --swiftbar)  swiftbar=1 ;;
         --no-daemon) daemon=0 ;;
         --sing-box)  singbox_only=1 ;;
-        --device)    [ -n "${2:-}" ] && [[ "$2" != -* ]] || { echo "--device needs a name (see --help)" >&2; exit 1; }
+        --device)    [ -n "${2:-}" ] && [[ "$2" != -* ]] || die "--device needs a name (see --help)"
                      device="$2"; shift ;;
         --device=*)  device="${1#--device=}" ;;
         -h|--help)   usage; exit 0 ;;
-        *) echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
+        *) die "Unknown option: $1 (see --help)" ;;
     esac
     shift
 done
@@ -132,8 +131,8 @@ if [ "$singbox_only" = 1 ]; then
 fi
 
 # This Mac's device: --device, else ~/wg-tunnels/devices/.default, else ask
-existing=$(cd "$DEVICES" 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | paste -sd' ' -)
-[ -n "$device" ] || device=$(cat "$DEFAULT_FILE" 2>/dev/null)
+existing=$(folders "$DEVICES" | paste -sd' ' -)
+[ -n "$device" ] || device=$MAC
 if [ -z "$device" ]; then
     [ -t 0 ] || die "This Mac's device name, please: ./install.sh --device <name> (e.g. mbp-1, the name its wg-tools configs end in)"
     [ -n "$existing" ] && echo "  device folders: $existing"

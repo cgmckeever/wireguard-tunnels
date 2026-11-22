@@ -71,6 +71,7 @@ if [ "$1" = run ]; then
         down) what="VPN off" ;;
         rotate-warp) what="New WARP keys" ;;
         update) what="Daemon update" ;;
+        breakglass) what="Breakglass" ;;
         *)    what="$1" ;;
     esac
     if [ "$rc" -eq 0 ] && [ "$1" = update ] && grep -q "up to date" <<< "$out"; then
@@ -379,7 +380,9 @@ echo "--Log | bash=$TUNNEL param1=log terminal=true"
 echo "--Export Diagnostics… | bash=$SELF param1=run param2=diag terminal=false"
 echo "--Rotate WARP Keys | bash=$SELF param1=run param2=rotate-warp terminal=false refresh=true"
 # The daemon is a copy of the repo's tunnel.sh: flag it when a git pull changed that
-if [ ! -x /usr/local/sbin/wg-tunnels ] || cmp -s "$TUNNEL" /usr/local/sbin/wg-tunnels; then
+if [ ! -x /usr/local/sbin/wg-tunnels ]; then
+    echo "--Install Daemon (not installed) | bash=$SELF param1=run param2=update terminal=false refresh=true"
+elif cmp -s "$TUNNEL" /usr/local/sbin/wg-tunnels; then
     echo "--Update Daemon | bash=$SELF param1=run param2=update terminal=false refresh=true"
 else
     echo "--Update Daemon (out of date) | bash=$SELF param1=run param2=update terminal=false refresh=true"

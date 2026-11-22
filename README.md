@@ -873,7 +873,8 @@ in place (the WireGuard app's export drops that line). The sweep writes only
 (it names its own `<server>.<config>.conf` and leaves `warped.*` alone), so
 the two can't write over each other. A warped tunnel made from a
 wireguard-tools carrier keeps its `# wireguard-tools client:` line; that's
-fine, both sides go by the name.
+fine, both sides go by the name. `tunnel.sh extract` goes by that line
+instead: it keeps a config that has it, and replaces the rest from the zip.
 
 **Who writes what in `config/`.** wireguard-tools, `nord.sh` and the sweep
 each write a tunnel with `PersistentKeepalive = 25`, and the WireGuard app,
@@ -907,41 +908,12 @@ and the rest are still checked. It exits 1 on any error, so it can gate a script
 
 The sweep, `singbox.sh` and `check.sh` are Python in `wgtun/` (stdlib only,
 Python 3.9 or later: macOS's own `/usr/bin/python3` will do; the scripts run
-whichever `python3` is first on your `PATH`). The three are links to
-`scripts/_python.sh`, which runs the module for the name it was called by.
-`tunnel.sh`, `nord.sh`, `qr.sh` and `install.sh` stay shell: `tunnel.sh` is
-the root daemon, installed as one file, so it can't load code from the repo.
-`nord.sh`, `qr.sh` and install.sh share `scripts/_lib.sh` (the device picker,
-the store's paths, `die`, help); install.sh asks `wgtun/forinstall.py` for the
-store's steps (device names, folders, the WARP account, the daemon's
-`warp.conf`) and installs the daemon with `tunnel.sh update`, so each is done once.
+whichever `python3` is first on your `PATH`). `tunnel.sh` stays standalone
+bash: it's the root daemon, installed as one file.
 
-| File | What |
-|------|------|
-| `wgtun/conf.py` | A WireGuard config: values read as `wg-quick` reads them, line rewrites, whether it's usable |
-| `wgtun/store.py` | The store: a device's folders, names, ordering, the WARP endpoint, the shared numbers (keepalive, MTUs), the shared-key rule |
-| `wgtun/sweep.py` | `wgwarp-sweep.sh` |
-| `wgtun/singbox.py` | `singbox.sh` |
-| `wgtun/check.py` | `check.sh` |
-| `wgtun/forinstall.py` | What `install.sh` asks of it: the WARP endpoint, 0700 folders, the WARP account, the daemon's `warp.conf` |
-
-The sweep and `build` each have a `plan()` that changes nothing; `check.sh`
-compares their plans with the disk.
-
-`./test.sh` runs the tests (each builds its own store in a temp folder, with
-fake keys); `./test.sh lint` runs ruff and mypy, and `bash -n` (macOS's bash
-3.2) on every shell script; `./test.sh all` both. The
-first run makes `.venv/` with pytest, ruff and mypy, on macOS's Python 3.9
-when it's there (the oldest the scripts must run on). `./test.sh hooks` has git
-run `./test.sh all` before each commit (`.githooks/pre-commit`), and GitHub
-Actions runs it on every push (`.github/workflows/tests.yml`, on macOS).
-`CLAUDE.md` says how to change things without tangling them.
-
-- `tests/golden/` pins the output of the shell scripts these replaced: the
-  store `edge_store.py` makes, and every file, mode and line they printed
-  after running each of its devices. Change it only when what the scripts
-  write or say is meant to change. Its docstring in `tests/test_golden.py`
-  says how it was made.
-- `tunnel.sh` keeps its own copies of a few rules (the keepalive, WARP's 80
-  bytes, what a warped config looks like); `tests/test_tunnel_sh.py` keeps
-  them in step with `wgtun/`.
+- `./test.sh all` runs the tests and lint; `./test.sh hooks` has git run it
+  before each commit, and GitHub Actions runs it on every push (on macOS).
+- `tests/golden/` pins every file, mode and line the old shell scripts wrote:
+  change it only when what the scripts write or say is meant to change.
+- `CLAUDE.md` has the layout, the contract between the parts, and the rules
+  for changing them without tangling them.

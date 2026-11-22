@@ -9,7 +9,8 @@ PROG=$(basename "$SELF")                        # nord.sh, qr.sh: through a link
 HERE=$(dirname "$SELF")                         # the sourcing script's folder
 WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"    # the store shared with wireguard-tools
 DEVICES="$WG_TUNNELS/devices"
-MAC=$(cat "$DEVICES/.default" 2>/dev/null)      # this Mac's device (tunnel.sh default)
+DEFAULT_FILE="$DEVICES/.default"                # this Mac's device (tunnel.sh default)
+MAC=$(cat "$DEFAULT_FILE" 2>/dev/null)
 
 die() { echo "$PROG: $*" >&2; exit 1; }
 

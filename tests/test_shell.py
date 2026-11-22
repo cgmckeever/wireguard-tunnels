@@ -14,14 +14,13 @@ import subprocess
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-# As test.sh's lint finds them (links to _python.sh aren't scripts of their own)
+# Every shell script (links to _python.sh aren't scripts of their own)
 SCRIPTS = sorted(
     os.path.relpath(p, REPO)
     for pattern in ("install.sh", "test.sh", ".githooks/pre-commit", "scripts/*.sh", "scripts/swiftbar/*.sh")
     for p in glob.glob(os.path.join(REPO, pattern))
     if not os.path.islink(p)
 )
-SOURCED = {"scripts/nord.sh": "scripts/_lib.sh", "scripts/qr.sh": "scripts/_lib.sh", "install.sh": "scripts/_lib.sh"}
 # Programs only some Macs have, or that install.sh installs: not on PATH everywhere
 OPTIONAL = {
     "wg",
@@ -68,6 +67,10 @@ KEYWORDS = {
 def read(rel: str) -> str:
     with open(os.path.join(REPO, rel), encoding="utf-8") as f:
         return f.read()
+
+
+# Which scripts source _lib.sh, as they say so themselves (not _lib.sh's own header)
+SOURCED = {s: "scripts/_lib.sh" for s in SCRIPTS if s != "scripts/_lib.sh" and '/_lib.sh"' in read(s)}
 
 
 def code(text: str) -> str:
@@ -188,3 +191,14 @@ def test_every_command_exists(script):
 def test_it_catches_a_missing_one():
     text = code('cmd_up() {\n    stop_apps\n    ask up "$1" || return 1\n}\nstop_apps() { :; }\n')
     assert sorted(called(text) - defined(text) - builtins()) == ["ask"]
+
+
+@pytest.mark.parametrize("script", SCRIPTS)
+def test_parses_in_macos_bash(script):
+    """bash -n under /bin/bash (3.2): what runs the #!/bin/bash scripts."""
+    run = subprocess.run(["/bin/bash", "-n", os.path.join(REPO, script)], capture_output=True, text=True)
+    assert run.returncode == 0, run.stderr
+
+
+def test_sources_found():
+    assert set(SOURCED) == {"install.sh", "scripts/nord.sh", "scripts/qr.sh"}

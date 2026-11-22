@@ -113,7 +113,7 @@ def test_nord_sh_writes_the_same_keepalive():
 
 def test_nord_sh_writes_the_mark_wgtun_reads():
     with open(os.path.join(store.SCRIPTS, "nord.sh"), encoding="utf-8") as f:
-        assert f'echo "{store.NORD_MARK} ' in f.read()
+        assert f'source_line="{store.NORD_MARK} ' in f.read()
 
 
 def test_render_drops_hook_lines(tmp_path):

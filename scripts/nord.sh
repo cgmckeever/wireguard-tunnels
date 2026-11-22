@@ -143,13 +143,15 @@ if [ -f "$out" ]; then
     is_nord "$out" || die "$out has no \"# source: nord\" line: not replacing a file nord.sh didn't write"
     current=$(endpoint_ip "$out")
 fi
-# A device's carrier is also in its config/ as the sweep's warped copy: that's
-# this file, not another holder
-own_copy=""
-[ "$kind/$role" = device/carrier ] && own_copy="$base/$holder/config/warped.$name.$holder.conf"
+# A device's carrier is also in its config/ as the sweep's warped copy, which
+# keeps this file's source line: that's this file, not another holder (found
+# by that line, not by rebuilding the sweep's name for it)
+source_line="# source: nord $cc${want_city:+ $slug}"
 taken=" "
-for f in "$WG_TUNNELS"/devices/*/{carriers,config}/*.conf "$WG_TUNNELS"/servers/*/carriers/*.conf; do
-    [ "$f" = "$out" ] || [ "$f" = "$own_copy" ] && continue
+for f in "$DEVICES"/*/{carriers,config}/*.conf "$WG_TUNNELS"/servers/*/carriers/*.conf; do
+    [ "$f" = "$out" ] && continue
+    [ "$kind/$role" = device/carrier ] && [[ "$f" == "$base/$holder/config/warped."* ]] \
+        && grep -qxF "$source_line" "$f" && continue
     is_nord "$f" && taken+="$(endpoint_ip "$f") "
 done
 
@@ -213,7 +215,7 @@ tmp=$(mktemp "$dir/.nord.XXXXXX") || die "mktemp failed in $dir"
 trap 'rm -f "$tmp"' EXIT
 {
     [ "$kind" = server ] && echo "# jump: $code $place (Nord $short)"
-    echo "# source: nord $cc${want_city:+ $slug}"
+    echo "$source_line"
     echo "# nord: $host, $place"
     echo "[Interface]"
     echo "PrivateKey = $key"

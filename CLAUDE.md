@@ -19,6 +19,9 @@ the behavior; this file says how to change it without tangling it again.
     `warped.*`.
   - `nord.sh` writes `nord.<cc>[.<city>].conf`, and rewrites only a file
     with a `# source: nord` line.
+  - `tunnel.sh extract` is the exception that goes by a line, not a name: it
+    replaces this Mac's `config/` from a WireGuard-app export zip, keeping
+    only files with a `# wireguard-tools client:` line.
   - Nothing else in `config/` is ours to rewrite.
 - **`tunnel.sh` stays one standalone bash file.** It's the root daemon,
   copied to `/usr/local/sbin/wg-tunnels`, so it must never source or import
@@ -28,6 +31,10 @@ the behavior; this file says how to change it without tangling it again.
     overhead, the `warped.` prefix, WARP alone's name, device names, what a
     swept config looks like, and how a config value is read. `nord.sh`'s
     keepalive is pinned there too.
+- **The menu bar plugin reads what `tunnel.sh` leaves.** That's `$RUN/*`
+  and `tunnels.tsv`, and some of its messages ("Daemon up to date", diag's
+  last line, failure lines). Change those together with
+  `scripts/swiftbar/tunnel-status.5s.sh`.
 - **Generated output only changes on purpose.** `tests/test_golden.py` pins
   every file, mode and printed line against the old shell scripts. If a
   change is meant to alter output, update `tests/golden/` in the same commit
@@ -43,14 +50,19 @@ the behavior; this file says how to change it without tangling it again.
 6. **Constraints.**
    - Python: stdlib only, 3.9 (macOS's `/usr/bin/python3`).
    - Shell: `/bin/bash` is 3.2.
+   - Test tools: ruff, pytest and mypy are pinned in `pyproject.toml`; `test.sh` reads them there.
    - Private keys and tokens never go on a command line (`ps` shows them to every user).
 
 ## Layout
 
 | Where | What |
 |-------|------|
-| `wgtun/` | Python behind `wgwarp-sweep.sh`, `singbox.sh`, `check.sh` (links to `scripts/_python.sh`) and `install.sh`'s store steps (`forinstall.py`) |
+| `wgtun/conf.py` | A WireGuard config: values read as `wg-quick` reads them, line rewrites, whether it's usable |
+| `wgtun/store.py` | The store: a device's folders, names, ordering, the WARP endpoint, the shared numbers, the key rule |
+| `wgtun/sweep.py`, `singbox.py`, `check.py` | `wgwarp-sweep.sh`, `singbox.sh`, `check.sh` (all three links to `scripts/_python.sh`); the sweep and build each have a `plan()` that changes nothing, which check compares with the disk |
+| `wgtun/forinstall.py` | `install.sh`'s store steps: device names, the WARP endpoint, folders, the WARP account, the daemon's `warp.conf` |
 | `scripts/tunnel.sh` | The daemon and this Mac's CLI (standalone bash) |
 | `scripts/_lib.sh` | What `nord.sh`, `qr.sh` and `install.sh` share |
+| `scripts/nord.sh`, `qr.sh`, `wgtun.sh`, `swiftbar/` | Nord configs, QR codes, the one entry point, the menu bar plugin |
 | `tests/` | pytest; `golden/` is the recorded shell output |
 | `.githooks/pre-commit`, `.github/workflows/tests.yml` | Both run `./test.sh all` |

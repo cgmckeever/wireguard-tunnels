@@ -14,3 +14,7 @@ ignore = ["UP006", "UP007", "UP035", "UP045"]
 files = ["wgtun"]
 python_version = "3.9"      # macOS's /usr/bin/python3
 ignore_missing_imports = true
+
+[tool.wgtun.pins]               # the test tools' versions, beside ruff's (test.sh reads them)
+pytest = "8.4.2"
+mypy = "1.19.1"
