@@ -4,6 +4,7 @@ rules every tunnel follows."""
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import locale
 import os
 import re
@@ -62,7 +63,7 @@ def valid_device(name: str) -> bool:
     return re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9._-]*", name) is not None
 
 
-def check_device(name: str) -> None:
+def require_device_name(name: str) -> None:
     """valid_device, or the Error that says why not."""
     if not valid_device(name):
         raise Error(f"device names are letters, digits, . _ - (not starting with .): {name}")
@@ -176,10 +177,20 @@ def warp_endpoint(folder: str) -> str:
     for f in (os.path.join(folder, ".warp-endpoint"), os.path.join(root(), ".warp-endpoint")):
         if os.path.isfile(f):
             ep = re.sub(r"[ \t\r\n]", "", read_text(f))
-            if not re.fullmatch(r"[0-9]{1,3}(\.[0-9]{1,3}){3}:[0-9]+", ep):
+            if not valid_endpoint(ep):
                 raise Error(f"{f}: IPv4:port, e.g. {WARP_ENDPOINT} (not {ep})")
             return ep
     return WARP_ENDPOINT
+
+
+def valid_endpoint(ep: str) -> bool:
+    """An IPv4 address and a port (1-65535), as in 162.159.192.1:2408."""
+    host, _, port = ep.rpartition(":")
+    try:
+        ipaddress.IPv4Address(host)
+    except ValueError:
+        return False
+    return port.isascii() and port.isdigit() and 1 <= int(port) <= 65535
 
 
 def warp_net(endpoint: str) -> str:
@@ -214,6 +225,13 @@ def write_private(path: str, text: str) -> None:
     except BaseException:
         os.unlink(tmp)
         raise
+
+
+def case_twins(paths: Iterable[str], wanted: Iterable[str]) -> List[str]:
+    """The paths that are a wanted path with different case: the same file on
+    the Mac's file system, which a write would keep under its old name."""
+    lower = {w.lower(): w for w in wanted}
+    return [p for p in paths if lower.get(p.lower(), p) != p]
 
 
 def update_private(path: str, text: str) -> str:

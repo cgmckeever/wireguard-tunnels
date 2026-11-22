@@ -77,9 +77,10 @@ def test_warp_endpoint_device_then_store_then_cloudflare(store_root):
     assert store.warp_endpoint(dev) == "162.159.192.5:2408"
     s.put("devices/d/.warp-endpoint", " 162.159.192.9:500 \n")
     assert store.warp_endpoint(dev) == "162.159.192.9:500"
-    s.put("devices/d/.warp-endpoint", "engage.cloudflareclient.com:2408")
-    with pytest.raises(Error, match="IPv4:port"):
-        store.warp_endpoint(dev)
+    for bad in ("engage.cloudflareclient.com:2408", "999.1.1.1:2408", "162.159.192.1:99999", "162.159.192.1:0"):
+        s.put("devices/d/.warp-endpoint", bad)
+        with pytest.raises(Error, match="IPv4:port"):
+            store.warp_endpoint(dev)
 
 
 def test_sweep_owned_by_name():

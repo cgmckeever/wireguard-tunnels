@@ -48,7 +48,7 @@ import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Set
 
 from . import store, sweep
 from .conf import Conf
@@ -158,7 +158,7 @@ class Device(store.Folder):
     def __init__(self, name: str, verb: str) -> None:
         if not name:
             raise Error(f"a device name, please (singbox.sh {verb} <device>)")
-        store.check_device(name)
+        store.require_device_name(name)
         super().__init__(store.device_dir(name))
         self.setup = "install.sh" if name == store.this_mac() else f"{HERE} new {name}"
 
@@ -173,7 +173,7 @@ def units(dev: Device, swept: sweep.Sweep, say: Say) -> List[Unit]:
     usable = {r.name for r in swept.written()}
     warp = next((c for c in configs if c.name == store.warp_alone(dev.name) and c.name in usable), None)
     out: List[Unit] = []
-    seen_cidrs: set = set()
+    seen_cidrs: Set[str] = set()
     for c in [c for c in configs if store.is_warped(c.name)] + \
              [c for c in configs if not store.sweep_owned(c.name, dev.name)]:
         why = c.problem()
@@ -208,7 +208,7 @@ def plain(c: Conf, mtu: int, say: Say) -> Unit:
     return Unit(c, [endpoint(c, c.name, mtu)], [], mtu)
 
 
-def warped(c: Conf, mtu: int, warp: Conf, seen_cidrs: set, say: Say) -> Unit:
+def warped(c: Conf, mtu: int, warp: Conf, seen_cidrs: Set[str], say: Say) -> Unit:
     """WARP detoured through the carrier. The carrier's extras (device-network,
     tunnel-routes) need a rule: AllowedIPs doesn't route in sing-box, so
     without one they'd go into WARP. WARP runs at its own MTU (1280 from
@@ -297,6 +297,10 @@ def cmd_build(name: str) -> None:
     store.private_dir(out)
     print(f"== Profiles in {out}")
     checked = sing_box_check(files)
+    # A profile renamed by case alone (Dengar -> dengar): off first, or the
+    # write keeps the old name and the cleanup below removes it
+    for path in store.case_twins(store.files_in(out, ".json"), (os.path.join(out, f) for f in files)):
+        os.remove(path)
     for f, text in files.items():
         print(f"{f:<48} {store.update_private(os.path.join(out, f), text)}")
     for path in store.files_in(out, ".json"):

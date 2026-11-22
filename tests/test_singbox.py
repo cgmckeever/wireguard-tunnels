@@ -229,3 +229,13 @@ def test_new_claims_only_what_it_wrote(tmp_store, fake_wgcf, capsys):
     tmp_store.put("devices/tv/warp/wgcf-profile.conf", "[Interface]\nPrivateKey = x\n")      # broken
     singbox.cmd_new("tv")
     assert "WireGuard app config" not in capsys.readouterr().out
+
+
+def test_a_tunnel_renamed_by_case_keeps_its_profile(phone, capsys):
+    """APFS: writing dengar.ph.json over Dengar.ph.json keeps the old name."""
+    os.rename(phone.path("devices/ph/config/dengar.ph.conf"), phone.path("devices/ph/config/Dengar.ph.conf"))
+    singbox.cmd_build("ph")
+    os.rename(phone.path("devices/ph/config/Dengar.ph.conf"), phone.path("devices/ph/config/dengar.ph.conf"))
+    singbox.cmd_build("ph")
+    assert "dengar.ph.json" in os.listdir(phone.path("devices/ph/sing-box"))
+    assert "Dengar.ph.json" not in os.listdir(phone.path("devices/ph/sing-box"))

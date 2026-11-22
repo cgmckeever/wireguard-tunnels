@@ -51,7 +51,7 @@ import re
 import subprocess
 import sys
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from . import store
 from .conf import Conf, stem
@@ -191,24 +191,24 @@ class Sweep:
     def plan(self) -> List[Row]:
         """Every row of the table, with what to write; changes nothing."""
         rows: List[Row] = []
-        claimed = set()
+        claimed: Set[str] = set()       # lower case: the Mac's file system ignores case
         profile = Conf.read(self.f.profile) if os.path.isfile(self.f.profile) else None
         warp_mtu = profile.mtu(store.WARP_MTU) if profile else store.WARP_MTU
         for path in store.files_in(self.f.carriers):
             name = store.warped_name(path, self.f.name)
             carrier = Conf.read(path)
             # The carrier's own problem first: a broken one doesn't take the name from a good one
-            why = carrier.problem() or (f"another carrier already makes {name}" if name in claimed else "")
+            why = carrier.problem() or (f"another carrier already makes {name}" if name.lower() in claimed else "")
             if why:
                 rows.append(Row(name, "skipped", detail=f"{os.path.basename(path)}: {why}", source=path))
                 continue
-            claimed.add(name)
+            claimed.add(name.lower())
             found = extras(carrier)
             rows.append(self.output(name, render_warped(carrier, store.warp_net(self.endpoint), found["kept"]),
                                     path, notes=carrier_notes(carrier, found, warp_mtu)))
         if profile:
             name = store.warp_alone(self.f.name)
-            claimed.add(name)
+            claimed.add(name.lower())
             why = profile.problem()
             rows.append(Row(name, "skipped", detail=f"warp/wgcf-profile.conf: {why}", source=self.f.profile) if why
                         else self.output(name, render_warp_alone(profile, self.endpoint), self.f.profile,
@@ -217,7 +217,7 @@ class Sweep:
         # orphan: reported, never deleted); anything else is someone else's
         for path in store.files_in(self.f.config):
             name = stem(path)
-            if name not in claimed:
+            if name.lower() not in claimed:
                 rows.append(Row(name, "orphan" if store.sweep_owned(name, self.f.name) else "manual", path=path))
         return rows
 
@@ -237,7 +237,8 @@ class Sweep:
     def configs(self) -> List[Conf]:
         """config/ as it is once the sweep has run (read now, or as it will be)."""
         planned = {r.path: r.text for r in self.written()}
-        paths = store.collated(set(store.files_in(self.f.config)) | set(planned))
+        on_disk = set(store.files_in(self.f.config)) - set(store.case_twins(store.files_in(self.f.config), planned))
+        paths = store.collated(on_disk | set(planned))
         return [Conf(planned[p], p) if p in planned else Conf.read(p) for p in paths]
 
     def write(self) -> None:
@@ -246,6 +247,8 @@ class Sweep:
         store.private_dir(self.f.config)
         if not self.no_carriers:
             store.private_dir(self.f.carriers)
+        for path in store.case_twins(store.files_in(self.f.config), (r.path for r in self.written())):
+            os.remove(path)            # renamed by case alone: off first, or the write keeps the old name
         for r in self.written():
             store.update_private(r.path, r.text)
 

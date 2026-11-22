@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import os
 import re
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 
 
 class Error(Exception):
@@ -51,7 +51,7 @@ class Conf:
     def mtu(self, default: int) -> int:
         return self.number("MTU", default)
 
-    def endpoint(self) -> tuple[str, int]:
+    def endpoint(self) -> Tuple[str, int]:
         """(host, port), brackets taken off an IPv6 host."""
         host, _, port = self.value("Endpoint").rpartition(":")
         return host.strip("[]"), int(port)

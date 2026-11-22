@@ -207,3 +207,15 @@ def test_written_as_utf8_whatever_the_locale(tmp_store, monkeypatch):
     run(tmp_store, "ph")
     assert {r.state for r in run(tmp_store, "ph").written()} == {"unchanged"}
     assert tmp_store.read("devices/ph/config/warped.srv.ph.conf").startswith("# café\n")
+
+
+def test_a_carrier_renamed_by_case(tmp_store):
+    """The old warped file is the new one (APFS), not an orphan to delete."""
+    tmp_store.device("ph")
+    tmp_store.put("devices/ph/carriers/Srv.conf", client("srv"))
+    run(tmp_store, "ph")
+    os.rename(tmp_store.path("devices/ph/carriers/Srv.conf"), tmp_store.path("devices/ph/carriers/srv.conf"))
+    s = run(tmp_store, "ph")
+    assert not [r for r in s.rows if r.state == "orphan"]
+    assert [c.name for c in s.configs() if c.name.lower() == "warped.srv.ph"] == ["warped.srv.ph"]
+    assert "warped.srv.ph.conf" in os.listdir(tmp_store.path("devices/ph/config"))

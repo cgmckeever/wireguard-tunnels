@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import os
 import sys
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 
 from . import singbox, store, sweep
 from .conf import Conf
@@ -53,7 +53,7 @@ def modes(f: store.Folder) -> Found:
 def check_device(name: str) -> Found:
     f = store.Folder.of(name)
     found = modes(f)
-    broken = set()                     # configs already reported: the sweep or build skips them
+    broken: Set[str] = set()                     # configs already reported: the sweep or build skips them
     unreadable = False                 # one the sweep or build would stop at
     for path in f.confs():
         try:
@@ -82,7 +82,7 @@ def stale(path: str, state: str, fix: str) -> Tuple[str, str]:
     return ("error", f"{path} is {'missing' if state == 'new' else 'out of date'}: {fix}")
 
 
-def up_to_date(f: store.Folder, broken: set) -> Found:
+def up_to_date(f: store.Folder, broken: Set[str]) -> Found:
     """config/ and sing-box/ against what the sweep and build would write now,
     and what they'd skip. Configs already reported broken aren't said again."""
     found: Found = []
@@ -117,7 +117,7 @@ def up_to_date(f: store.Folder, broken: set) -> Found:
 def report(name: str) -> int:
     """Print what's wrong with a device; how many errors."""
     try:
-        real = store.valid_device(name) and os.path.isdir(store.device_dir(name))
+        real = name in store.all_devices()        # a folder in devices/, whatever its name
         found = check_device(name) if real else [("error", f"no device {name}")]
     except store.FAILURES as e:        # one it can't finish (a folder it can't read): the rest go on
         found = [("error", str(e))]

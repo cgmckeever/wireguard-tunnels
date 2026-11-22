@@ -34,8 +34,10 @@ def daemon_warp(device_dir: str) -> str:
     why = profile.problem()             # as the sweep would skip it
     if why:
         raise Error(f"{f.profile}: {why}")
-    store_at = store.root().replace(os.path.expanduser("~"), "~", 1)
+    home = os.path.expanduser("~")
+    store_at = "~" + store.root()[len(home):] if store.root().startswith(home + os.sep) else store.root()
     mtu = profile.mtu(WARP_MTU)
+    why_mtu = "IPv6's minimum" if mtu == WARP_MTU else "The WARP profile's MTU"
     return f"""# Written by wireguard-tunnels install.sh from {store_at}/devices/{f.name}/warp/wgcf-profile.conf.
 #
 # Cloudflare WARP exit, carried inside another WireGuard tunnel (warped.*). `tunnel.sh import`
@@ -46,7 +48,7 @@ def daemon_warp(device_dir: str) -> str:
 PrivateKey = {profile.value("PrivateKey")}
 Address = {", ".join(profile.items("Address"))}
 DNS = 1.1.1.1
-# IPv6's minimum: fits in a carrier of {mtu + WARP_OVERHEAD} or more (tunnel.sh lowers it in a smaller one)
+# {why_mtu}: fits in a carrier of {mtu + WARP_OVERHEAD} or more (tunnel.sh lowers it in a smaller one)
 MTU = {mtu}
 Table = off
 
@@ -60,7 +62,7 @@ PersistentKeepalive = {KEEPALIVE}
 
 
 def device_name(args: List[str]) -> List[str]:
-    store.check_device(args[0])
+    store.require_device_name(args[0])
     return []
 
 

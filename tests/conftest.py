@@ -99,3 +99,12 @@ def fake_wgcf(tmp_path, monkeypatch) -> None:
     generate) printf '{profile}' > wgcf-profile.conf; chmod 644 wgcf-profile.conf ;;
     *) exit 1 ;;
 esac""")
+
+
+@pytest.fixture(autouse=True)
+def _umask() -> Iterator[None]:
+    """A main() sets umask 077 for the process: give each test the one it found."""
+    old = os.umask(0o022)
+    os.umask(old)
+    yield
+    os.umask(old)
