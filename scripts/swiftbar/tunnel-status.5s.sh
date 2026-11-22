@@ -15,10 +15,10 @@
 # Installed as a symlink into SwiftBar's plugin folder (install.sh --swiftbar);
 # the scripts are wherever the link points (scripts/swiftbar/..).
 
-SCRIPTS="$(cd "$(dirname "$(readlink -f "${SWIFTBAR_PLUGIN_PATH:-$0}")")/.." && pwd)"
+SELF="${SWIFTBAR_PLUGIN_PATH:-$0}"
+SCRIPTS="$(cd "$(dirname "$(readlink -f "$SELF")")/.." && pwd)"
 TUNNEL="$SCRIPTS/tunnel.sh"
 STATUS=/var/run/wg-tunnels/status
-SELF="${SWIFTBAR_PLUGIN_PATH:-$0}"
 for TSV in /opt/homebrew/etc/wg-tunnels/tunnels.tsv /usr/local/etc/wg-tunnels/tunnels.tsv; do
     [ -f "$TSV" ] && break
 done
@@ -35,6 +35,9 @@ app_tunnels() {
 fresh=""
 upd=$(st updated)
 [ -n "$upd" ] && [ $(( $(date +%s) - upd )) -le 15 ] && fresh=1
+# daemon_silent <app tunnels>: no word from the daemon, and no WireGuard app
+# tunnel up either (the icon and the Status popup say it the same way)
+daemon_silent() { [ -z "$fresh" ] && [ -z "$1" ]; }
 
 # Uptime: the daemon writes current once, when a tunnel is up (a reconnect or
 # a watchdog restart starts the clock again)
@@ -102,7 +105,7 @@ if [ "$1" = popup ]; then
     apps=$(app_tunnels)
     icons=/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources
     icon="$icons/LockedIcon.icns"
-    if [ -z "$fresh" ] && [ -f "$STATUS" ]; then
+    if daemon_silent "$apps"; then
         title="The daemon isn't answering (tunnel.sh status, or tunnel.sh log)"; icon="$icons/AlertStopIcon.icns"
     elif [ "$pstate" = paused ]; then title="Paused: ${pname}, back at $(date -r "${puntil:-0}" +%H:%M)"; icon="$icons/UnlockedIcon.icns"
     elif [ "$pstate" = connecting ]; then title="Connecting: ${pname}"
@@ -262,26 +265,25 @@ fi
 
 traffic=""
 if [ -n "$name" ]; then
-    xu="$exit_u"
     # The Link line has no Address column: Ibytes is $6, Obytes $9
-    read -r rx tx < <(netstat -ibn -I "$xu" 2>/dev/null | awk '/<Link#/ {print $6, $9; exit}')
+    read -r rx tx < <(netstat -ibn -I "$exit_u" 2>/dev/null | awk '/<Link#/ {print $6, $9; exit}')
     if [ -n "$rx" ]; then
         now=$(date +%s)
         cache="$DATA/traffic"
         read -r pu pt prx ptx 2>/dev/null < "$cache"
         rrx="" rtx=""
-        if [ "$pu" = "$xu" ] && [ -n "$pt" ] && [ "$now" -gt "$pt" ] && [ "$rx" -ge "$prx" ]; then
+        if [ "$pu" = "$exit_u" ] && [ -n "$pt" ] && [ "$now" -gt "$pt" ] && [ "$rx" -ge "$prx" ]; then
             dt=$((now - pt))
             rrx="  ($(human $(( (rx - prx) / dt )))/s)"
             rtx="  ($(human $(( (tx - ptx) / dt )))/s)"
         fi
-        echo "$xu $now $rx $tx" > "$cache"
+        echo "$exit_u $now $rx $tx" > "$cache"
         traffic="Tx: $(human "$tx")${rtx}"$'\n'"Rx: $(human "$rx")${rrx}"
     fi
 fi
 
 # The icon: one shape and colour per state
-if [ -z "$fresh" ] && [ -z "$apps" ]; then
+if daemon_silent "$apps"; then
     echo " | sfimage=exclamationmark.triangle.fill sfcolor=#FF3B30"
 else
     case "$state" in
@@ -340,21 +342,21 @@ esac
 [ -n "$apps" ] && echo "WireGuard app: ${apps//,/, }"
 [ -z "$fresh" ] && echo "wg-tunnels daemon not answering | color=red"
 echo "---"
-echo "Status | bash=$SELF param1=popup terminal=false"
+echo "Status | bash=\"$SELF\" param1=popup terminal=false"
 # Reconnect: the tunnel that's up, or the one wanted but not up
 again="${name:-$( [ "$want" = up ] && st desired | cut -d' ' -f2- )}"
-[ -n "$again" ] && echo "Reconnect | bash=$SELF param1=run param2=reconnect param3=$again terminal=false refresh=true"
+[ -n "$again" ] && echo "Reconnect | bash=\"$SELF\" param1=run param2=reconnect param3=$again terminal=false refresh=true"
 # Pause: the kill switch is on (or already paused, for a new end time)
 if [ "$armed" = yes ] || [ "$want" = pause ]; then
-    [ "$want" = pause ] && echo "Resume Now | bash=$SELF param1=run param2=resume terminal=false refresh=true"
+    [ "$want" = pause ] && echo "Resume Now | bash=\"$SELF\" param1=run param2=resume terminal=false refresh=true"
     [ "$want" = pause ] && echo "Pause For" || echo "Pause Protection"
     for m in 5 15 60; do
         [ "$m" = 60 ] && label="1 hour" || label="${m} minutes"
-        echo "--${label} | bash=$SELF param1=run param2=pause param3=$m terminal=false refresh=true"
+        echo "--${label} | bash=\"$SELF\" param1=run param2=pause param3=$m terminal=false refresh=true"
     done
 fi
-echo "Disconnect (Tunnel Down) | bash=$SELF param1=run param2=down terminal=false refresh=true"
-echo "Breakglass (Reset No Tunnel) | bash=$SELF param1=run param2=breakglass terminal=false refresh=true"
+echo "Disconnect (Tunnel Down) | bash=\"$SELF\" param1=run param2=down terminal=false refresh=true"
+echo "Breakglass (Reset No Tunnel) | bash=\"$SELF\" param1=run param2=breakglass terminal=false refresh=true"
 echo "---"
 # Switcher: every imported tunnel, the one up checked
 for group in warped other; do
@@ -369,21 +371,21 @@ for group in warped other; do
             if [ "$t" = "$name" ]; then
                 echo "${t}${extra} | checked=true"
             else
-                echo "${t}${extra} | bash=$SELF param1=run param2=up param3=$t terminal=false refresh=true"
+                echo "${t}${extra} | bash=\"$SELF\" param1=run param2=up param3=$t terminal=false refresh=true"
             fi
         done
 done
 echo "---"
 echo "More"
-echo "--Status in Terminal | bash=$TUNNEL param1=status terminal=true"
-echo "--Log | bash=$TUNNEL param1=log terminal=true"
-echo "--Export Diagnostics… | bash=$SELF param1=run param2=diag terminal=false"
-echo "--Rotate WARP Keys | bash=$SELF param1=run param2=rotate-warp terminal=false refresh=true"
+echo "--Status in Terminal | bash=\"$TUNNEL\" param1=status terminal=true"
+echo "--Log | bash=\"$TUNNEL\" param1=log terminal=true"
+echo "--Export Diagnostics… | bash=\"$SELF\" param1=run param2=diag terminal=false"
+echo "--Rotate WARP Keys | bash=\"$SELF\" param1=run param2=rotate-warp terminal=false refresh=true"
 # The daemon is a copy of the repo's tunnel.sh: flag it when a git pull changed that
 if [ ! -x /usr/local/sbin/wg-tunnels ]; then
-    echo "--Install Daemon (not installed) | bash=$SELF param1=run param2=update terminal=false refresh=true"
+    echo "--Install Daemon (not installed) | bash=\"$SELF\" param1=run param2=update terminal=false refresh=true"
 elif cmp -s "$TUNNEL" /usr/local/sbin/wg-tunnels; then
-    echo "--Update Daemon | bash=$SELF param1=run param2=update terminal=false refresh=true"
+    echo "--Update Daemon | bash=\"$SELF\" param1=run param2=update terminal=false refresh=true"
 else
-    echo "--Update Daemon (out of date) | bash=$SELF param1=run param2=update terminal=false refresh=true"
+    echo "--Update Daemon (out of date) | bash=\"$SELF\" param1=run param2=update terminal=false refresh=true"
 fi

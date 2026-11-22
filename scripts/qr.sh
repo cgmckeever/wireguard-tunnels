@@ -19,7 +19,7 @@
 SELF=$(readlink -f "$0"); . "$(dirname "$SELF")/_lib.sh"
 
 case "$1" in -h|--help) usage; exit 0 ;; esac
-[ $# -le 2 ] || die "usage: qr.sh [<device> [<tunnel>]]"
+[ $# -le 2 ] || usage_error "qr.sh [<device> [<tunnel>]]"
 command -v qrencode >/dev/null || die "qrencode missing (install.sh, or brew install qrencode)"
 
 shopt -s nullglob

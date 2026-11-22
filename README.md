@@ -107,7 +107,7 @@ On your Mac (macOS 12.3 or later, and [Homebrew](https://brew.sh)):
    Both make your folders ([Your folders](#your-folders)): 1 asks for this
    Mac's device name (`mbp-1`, say), 2 for a first device (`iphone`, say).
    To keep them somewhere other than `~/wg-tunnels`, set `WG_TUNNELS` in your
-   shell profile first ([Your folders](#your-folders)).
+   shell profile first.
 3. **Add your WireGuard configs.** The `.conf` files you download from
    your VPN provider or server go in the device's folder, in one of two
    places:

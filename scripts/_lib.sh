@@ -13,6 +13,8 @@ DEFAULT_FILE="$DEVICES/.default"                # this Mac's device (tunnel.sh d
 MAC=$(cat "$DEFAULT_FILE" 2>/dev/null)
 
 die() { echo "$PROG: $*" >&2; exit 1; }
+# usage_error <forms>: "usage: <forms>" and exit 1 (not die's "<prog>: usage:")
+usage_error() { echo "usage: $*" >&2; exit 1; }
 
 # usage: the script's header comment, as its -h shows it
 usage() { sed -n '2,/^$/s/^# \{0,1\}//p' "$SELF"; }

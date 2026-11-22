@@ -56,6 +56,7 @@ case "${1:-}" in
         list
         [ -t 0 ] || exit 0
         echo
+        # Not _lib.sh's pick: here Enter quits, rather than taking a default
         read -rp "Pick one [1-${#TOOLS[@]}] (Enter = quit): " choice
         [ -n "$choice" ] || exit 0
         if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#TOOLS[@]} ]; then

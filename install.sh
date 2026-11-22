@@ -29,7 +29,7 @@
 #                 become: scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>)
 #   --sing-box [--device <name>]
 #                 Only what Sing-Box Device Tunnels need: wgcf, jq (nord.sh),
-#                 qrencode (qr.sh), ~/wg-tunnels/devices and a first device
+#                 qrencode (qr.sh), the store's devices/ and a first device
 #                 (asked, or --device; singbox.sh new makes more). No Local Mac Tunnels: no
 #                 WARP account for this Mac, no daemon, no sudo. Run it again
 #                 without --sing-box to add Local Mac Tunnels later
@@ -109,7 +109,7 @@ for pkg in $pkgs; do
     fi
 done
 
-echo "== ~/wg-tunnels"
+echo "== $WG_TUNNELS"
 
 if [ "$singbox_only" = 1 ]; then
     forinstall folders "$WG_TUNNELS" "$DEVICES" || exit 1
@@ -130,7 +130,7 @@ if [ "$singbox_only" = 1 ]; then
     exit 0
 fi
 
-# This Mac's device: --device, else ~/wg-tunnels/devices/.default, else ask
+# This Mac's device: --device, else devices/.default, else ask
 existing=$(folders "$DEVICES" | paste -sd' ' -)
 [ -n "$device" ] || device=$MAC
 if [ -z "$device" ]; then
@@ -147,14 +147,12 @@ if [ ! -d "$DEVICES/$device" ] && [ -n "$existing" ] && [ -t 0 ]; then
 fi
 DEV_DIR="$DEVICES/$device"
 WARP_DIR="$DEV_DIR/warp"
-# The WARP endpoint: <device>/.warp-endpoint, else ~/wg-tunnels/.warp-endpoint
-# (one line, IPv4:port), else Cloudflare's default. Read by the same code as
-# the sweep's (wgtun/), so this Mac's WARP and its config/ agree. Checked now,
-# before anything changes; used for warp.conf below.
+# The WARP endpoint (see the header), read by the same code as the sweep's so
+# this Mac's WARP and its config/ agree: checked now, before anything changes
 forinstall warp-endpoint "$DEV_DIR" > /dev/null || exit 1
 
 umask 077    # until warp.conf is written: everything here holds private keys
-# 0700: everything under ~/wg-tunnels holds private keys
+# 0700: everything in the store holds private keys
 #   devices/         one folder per device; .default names this Mac's
 #     <device>/      this Mac's tunnels (other devices' sit beside it: singbox.sh new)
 #       carriers/    WireGuard configs to carry WARP (wgwarp-sweep.sh)

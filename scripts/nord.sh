@@ -51,9 +51,9 @@ DNS="103.86.96.100, 103.86.99.100"          # Nord's resolvers
 POOL=50                                     # recommended servers to choose from
 
 case "$1" in -h|--help) usage; exit 0 ;; esac
-USAGE_DEVICE="usage: nord.sh device <device> carrier|config <country> [<city>]"
-USAGE_SERVER="usage: nord.sh server <server> <country> [<city>]"
-[ $# -le 5 ] || die "$USAGE_DEVICE, or ${USAGE_SERVER#usage: }"
+USAGE_DEVICE="nord.sh device <device> carrier|config <country> [<city>]"
+USAGE_SERVER="nord.sh server <server> <country> [<city>]"
+[ $# -le 5 ] || usage_error "$USAGE_DEVICE, or $USAGE_SERVER"
 command -v jq >/dev/null || die "jq missing (brew install jq)"
 command -v curl >/dev/null || die "curl missing"
 
@@ -64,7 +64,8 @@ api() {
     curl -fsS --max-time 20 "$@" "$API/$path" || die "Nord's API didn't answer ($API/${path%%\?*})"
 }
 
-# endpoint_ip <conf>: the Endpoint's host
+# endpoint_ip <conf>: the Endpoint's host. Only ever of a file nord.sh wrote
+# (one exact "Endpoint = ip:port" line), so not wgtun's full reading of a config
 endpoint_ip() {
     awk -F'[[:space:]]*=[[:space:]]*' 'tolower($0) ~ /^[[:space:]]*endpoint[[:space:]]*=/ {print $2; exit}' "$1" \
         | sed 's/:[0-9]*$//'
@@ -86,7 +87,7 @@ holder=$(pick "$kind" "$2" "${names[@]}") || exit 1
 # 2. Carrier or config (a server's Nord file is always an exit: carriers/)
 if [ "$kind" = server ]; then
     role=carrier country_arg="$3" city_arg="$4"
-    [ $# -le 4 ] || die "$USAGE_SERVER"
+    [ $# -le 4 ] || usage_error "$USAGE_SERVER"
 else
     [ -n "$3" ] || [ ! -t 0 ] || echo "carrier: carries WARP (warped.nord.<cc>.$holder); config: a plain tunnel, Nord as the exit" >&2
     role=$(pick "kind of tunnel" "$3" carrier config) || exit 1
@@ -158,7 +159,7 @@ done
 # 6. A Nord server: the current one if it's still recommended and free, else
 # the first free recommendation
 recs=$(api "servers/recommendations?filters\[servers_technologies\]\[identifier\]=wireguard_udp&$filter&limit=$POOL" \
-    | jq -c '.[] | {host: .hostname, ip: .station, load,
+    | jq -c '.[] | {host: .hostname, ip: .station,
                    city: (.locations[0].country.city.name // ""),
                    pub: ([.technologies[] | select(.identifier == "wireguard_udp") | .metadata[]? | select(.name == "public_key") | .value][0] // "")}
              | select(.pub != "")') || exit 1

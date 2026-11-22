@@ -2,8 +2,8 @@
 # _python.sh — runs wgtun/'s Python for the name it's called by:
 # wgwarp-sweep.sh, singbox.sh and check.sh are links to it (each one's -h
 # says what it does). Python 3.9+ (macOS's own python3), stdlib only.
-# Follows links to find which one was meant and where the repo is (the menu
-# bar plugin, wgtun.sh or your own ~/bin may hold a link to a link).
+# Follows links to find which one was meant and where the repo is (wgtun.sh
+# or your own ~/bin may hold a link to a link).
 src="$0" module=""
 while :; do
     case "$(basename "$src" .sh)" in
