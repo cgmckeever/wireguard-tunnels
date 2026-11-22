@@ -639,7 +639,7 @@ case), the server it goes to: `<server>.list.<device>.json`.
 
 | Group profile | Tunnels in it |
 |---------------|---------------|
-| `dengar.list.iphone.json` | `dengar.chicago.iphone`, `dengar.warp.chi-us.iphone` |
+| `dengar.list.iphone.json` | `dengar.chi-us.iphone`, `dengar.warp.chi-us.iphone`, `dengar.warp.iphone` |
 | `proton.list.iphone.json` | `proton.chicago`, `proton.toronto` (provider configs used directly) |
 | `warped.list.iphone.json` | Every `warped.*` tunnel, whatever carries it, and `warp.iphone` |
 

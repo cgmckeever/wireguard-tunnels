@@ -375,7 +375,7 @@ commit_profiles() {
 }
 
 # group_key <tag>: the group profile a tunnel also goes in, from the first
-# word of its name, e.g. dengar.chicago.iphone in dengar's; warp.<device>
+# word of its name, e.g. dengar.chi-us.iphone in dengar's; warp.<device>
 # (WARP alone) goes with the warped tunnels
 group_key() {
     local k
