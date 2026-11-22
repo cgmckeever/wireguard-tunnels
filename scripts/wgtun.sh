@@ -8,8 +8,8 @@
 #   wgtun.sh <script> -h           that script's own usage
 #   wgtun.sh -h                    this list
 #
-# <script> is tunnel, singbox, nord, qr, wgwarp-sweep or check (".sh" optional). Each runs exactly
-# as it would by its own path.
+# <script> is tunnel, singbox, nord, qr, wgwarp-sweep or check (".sh"
+# optional). Each runs exactly as it would by its own path.
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ here=$(dirname "$(readlink -f "$0")")
 
 # name|summary
 TOOLS=(
-    "tunnel|This Mac's tunnels: up, down, pause, status, import, extract, rotate-warp, diag"
+    "tunnel|This Mac's tunnels: up, down, status, import... (-h for all)"
     "singbox|Devices on sing-box (iPhone, Apple TV...): new, build, list"
     "nord|A NordVPN config for a device (carrier or config) or a server (an exit)"
     "qr|A device's tunnel as a QR code, to scan into the WireGuard app"

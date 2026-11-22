@@ -5,6 +5,7 @@ daemon, so nothing else here would."""
 
 from __future__ import annotations
 
+import glob
 import os
 import re
 import shutil
@@ -13,20 +14,14 @@ import subprocess
 import pytest
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCRIPTS = [
-    "install.sh",
-    "test.sh",
-    ".githooks/pre-commit",
-    "scripts/tunnel.sh",
-    "scripts/nord.sh",
-    "scripts/qr.sh",
-    "scripts/wgtun.sh",
-    "scripts/_lib.sh",
-    "scripts/_python.sh",
-    "scripts/askpass.sh",
-    "scripts/swiftbar/tunnel-status.5s.sh",
-]
-SOURCED = {"scripts/nord.sh": "scripts/_lib.sh", "scripts/qr.sh": "scripts/_lib.sh"}
+# As test.sh's lint finds them (links to _python.sh aren't scripts of their own)
+SCRIPTS = sorted(
+    os.path.relpath(p, REPO)
+    for pattern in ("install.sh", "test.sh", ".githooks/pre-commit", "scripts/*.sh", "scripts/swiftbar/*.sh")
+    for p in glob.glob(os.path.join(REPO, pattern))
+    if not os.path.islink(p)
+)
+SOURCED = {"scripts/nord.sh": "scripts/_lib.sh", "scripts/qr.sh": "scripts/_lib.sh", "install.sh": "scripts/_lib.sh"}
 # Programs only some Macs have, or that install.sh installs: not on PATH everywhere
 OPTIONAL = {
     "wg",

@@ -40,11 +40,8 @@
 set -u
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
-WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
-DEVICES="$WG_TUNNELS/devices"          # one folder per device
+SELF="$REPO/install.sh"; . "$REPO/scripts/_lib.sh"   # WG_TUNNELS, DEVICES, die, usage
 DEFAULT_FILE="$DEVICES/.default"       # this Mac's device (tunnel.sh default)
-INSTALLED="/usr/local/sbin/wg-tunnels"
-PLIST="/Library/LaunchDaemons/com.local.wg-tunnels.plist"
 SWIFTBAR_APP="/Applications/SwiftBar.app"
 SWIFTBAR_AGENT="$HOME/Library/LaunchAgents/com.local.swiftbar.plist"
 
@@ -54,22 +51,22 @@ while [ $# -gt 0 ]; do
         --swiftbar)  swiftbar=1 ;;
         --no-daemon) daemon=0 ;;
         --sing-box)  singbox_only=1 ;;
-        --device)    [ -n "${2:-}" ] || { echo "--device needs a name (see --help)" >&2; exit 1; }
+        --device)    [ -n "${2:-}" ] && [[ "$2" != -* ]] || { echo "--device needs a name (see --help)" >&2; exit 1; }
                      device="$2"; shift ;;
         --device=*)  device="${1#--device=}" ;;
-        -h|--help)   sed -n '2,/^$/s/^# \{0,1\}//p' "$0"; exit 0 ;;
+        -h|--help)   usage; exit 0 ;;
         *) echo "Unknown option: $1 (see --help)" >&2; exit 1 ;;
     esac
     shift
 done
 
-die() { echo "$*" >&2; exit 1; }
 ok() { printf '  ok       %s\n' "$*"; }
 changed() { printf '  changed  %s\n' "$*"; }
 # The store's own steps, done by the code the sweep and singbox.sh use (wgtun/forinstall.py)
-forinstall() { PYTHONPATH="$REPO" python3 -m wgtun.forinstall "$@"; }
+forinstall() { PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" python3 -m wgtun.forinstall "$@"; }
 
 [ "$(uname -s)" = Darwin ] || die "macOS only"
+[ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
 # Which install, when nothing says: only asked before Local Mac Tunnels are
 # set up (no .default yet), so re-runs after a git pull don't ask
 if [ "$opts" = 0 ] && [ -t 0 ] && [ ! -f "$DEFAULT_FILE" ]; then
@@ -86,7 +83,6 @@ if [ "$opts" = 0 ] && [ -t 0 ] && [ ! -f "$DEFAULT_FILE" ]; then
 fi
 [ "$singbox_only" = 0 ] || { [ "$swiftbar" = 0 ] && [ "$daemon" = 1 ]; } \
     || die "--sing-box takes only --device: it sets up no Local Mac Tunnels"
-[ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
 
 echo "== Homebrew"
 if ! command -v brew >/dev/null 2>&1; then
@@ -103,8 +99,8 @@ ok "brew ($BREW_PREFIX)"
 # wireguard-tools brings wg, wg-quick, wireguard-go and the bash wg-quick needs
 # (Local Mac Tunnels); wgcf makes WARP accounts; jq reads Nord's API (nord.sh);
 # qrencode shows a tunnel as a QR for the WireGuard app (scripts/qr.sh)
-pkgs="wireguard-tools wgcf jq qrencode"
-[ "$singbox_only" = 1 ] && pkgs="wgcf jq qrencode"
+pkgs="wgcf jq qrencode"
+[ "$singbox_only" = 1 ] || pkgs="wireguard-tools $pkgs"
 for pkg in $pkgs; do
     if brew list --formula "$pkg" >/dev/null 2>&1; then
         ok "$pkg"
@@ -136,15 +132,14 @@ if [ "$singbox_only" = 1 ]; then
 fi
 
 # This Mac's device: --device, else ~/wg-tunnels/devices/.default, else ask
-valid_name() { [[ "$1" =~ ^[A-Za-z0-9_-][A-Za-z0-9._-]*$ ]]; }
 existing=$(cd "$DEVICES" 2>/dev/null && ls -d */ 2>/dev/null | tr -d / | paste -sd' ' -)
 [ -n "$device" ] || device=$(cat "$DEFAULT_FILE" 2>/dev/null)
 if [ -z "$device" ]; then
     [ -t 0 ] || die "This Mac's device name, please: ./install.sh --device <name> (e.g. mbp-1, the name its wg-tools configs end in)"
     [ -n "$existing" ] && echo "  device folders: $existing"
-    read -rp "  This Mac's device name (a folder in ~/wg-tunnels/devices; e.g. mbp-1, the name its wg-tools configs end in): " device
+    read -rp "  This Mac's device name (a folder in $DEVICES; e.g. mbp-1, the name its wg-tools configs end in): " device
 fi
-valid_name "$device" || die "Device names are letters, digits, . _ - (not starting with .): $device"
+forinstall device-name "$device" || exit 1
 # A new folder means a new WARP account and warp.conf: a typo for an existing
 # device shouldn't do that quietly
 if [ ! -d "$DEVICES/$device" ] && [ -n "$existing" ] && [ -t 0 ]; then
@@ -186,14 +181,10 @@ umask 022
 
 if [ "$daemon" = 1 ]; then
     echo "== daemon"
-    # Only when missing or different from the repo copy: installing restarts the
-    # daemon (a tunnel that's up drops for a few seconds)
-    if cmp -s "$REPO/scripts/tunnel.sh" "$INSTALLED" && [ -f "$PLIST" ]; then
-        ok "$INSTALLED"
-    else
-        sudo "$REPO/scripts/tunnel.sh" _install "$REPO/scripts/tunnel.sh" || die "Daemon install failed"
-        changed "$INSTALLED and $PLIST"
-    fi
+    # tunnel.sh update installs it only when it's missing or differs from the
+    # repo copy: installing restarts the daemon (a tunnel that's up drops for a few seconds)
+    "$REPO/scripts/tunnel.sh" update | sed 's/^/  /'
+    [ "${PIPESTATUS[0]}" -eq 0 ] || die "Daemon install failed"
 fi
 
 if [ "$swiftbar" = 1 ]; then

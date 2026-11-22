@@ -1,4 +1,4 @@
-# _lib.sh — what nord.sh and qr.sh share; they source it. (tunnel.sh doesn't:
+# _lib.sh — what nord.sh, qr.sh and install.sh share; they source it. (tunnel.sh doesn't:
 # it's the root daemon, one self-contained file. The sweep, singbox.sh and
 # check.sh are Python, in wgtun/.)
 #
@@ -6,7 +6,7 @@
 #   SELF=$(readlink -f "$0"); . "$(dirname "$SELF")/_lib.sh"
 
 PROG=$(basename "$SELF")                        # nord.sh, qr.sh: through a link too
-HERE=$(dirname "$SELF")                         # the repo's scripts/
+HERE=$(dirname "$SELF")                         # the sourcing script's folder
 WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"    # the store shared with wireguard-tools
 DEVICES="$WG_TUNNELS/devices"
 MAC=$(cat "$DEVICES/.default" 2>/dev/null)      # this Mac's device (tunnel.sh default)

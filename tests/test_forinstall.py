@@ -74,3 +74,11 @@ def test_warp_account_left_from_an_earlier_one(tmp_store, capsys, fake_wgcf):
     tmp_store.put("devices/mac/warp/wgcf-profile.conf", "old\n")
     run(capsys, "warp-account", tmp_store.path("devices/mac"))
     assert tmp_store.read("devices/mac/warp/wgcf-profile.conf").startswith("[Interface]")
+
+
+def test_device_name(capsys):
+    assert run(capsys, "device-name", "mbp-1") == ""
+    for bad in (".hidden", "my phone"):
+        assert forinstall.main(["device-name", bad]) == 1
+        err = capsys.readouterr().err
+        assert err == f"install.sh: Device names are letters, digits, . _ - (not starting with .): {bad}\n"

@@ -51,7 +51,9 @@ DNS="103.86.96.100, 103.86.99.100"          # Nord's resolvers
 POOL=50                                     # recommended servers to choose from
 
 case "$1" in -h|--help) usage; exit 0 ;; esac
-[ $# -le 5 ] || die "usage: nord.sh device <device> carrier|config <country> [<city>], or nord.sh server <server> <country> [<city>]"
+USAGE_DEVICE="usage: nord.sh device <device> carrier|config <country> [<city>]"
+USAGE_SERVER="usage: nord.sh server <server> <country> [<city>]"
+[ $# -le 5 ] || die "$USAGE_DEVICE, or ${USAGE_SERVER#usage: }"
 command -v jq >/dev/null || die "jq missing (brew install jq)"
 command -v curl >/dev/null || die "curl missing"
 
@@ -84,12 +86,11 @@ holder=$(pick "$kind" "$2" "${names[@]}") || exit 1
 # 2. Carrier or config (a server's Nord file is always an exit: carriers/)
 if [ "$kind" = server ]; then
     role=carrier country_arg="$3" city_arg="$4"
-    [ $# -le 4 ] || die "usage: nord.sh server <server> <country> [<city>]"
+    [ $# -le 4 ] || die "$USAGE_SERVER"
 else
     [ -n "$3" ] || [ ! -t 0 ] || echo "carrier: carries WARP (warped.nord.<cc>.$holder); config: a plain tunnel, Nord as the exit" >&2
     role=$(pick "kind of tunnel" "$3" carrier config) || exit 1
     country_arg="$4" city_arg="$5"
-    [ $# -le 5 ] || die "usage: nord.sh device <device> carrier|config <country> [<city>]"
 fi
 
 # 3. The country
@@ -158,7 +159,7 @@ recs=$(api "servers/recommendations?filters\[servers_technologies\]\[identifier\
     | jq -c '.[] | {host: .hostname, ip: .station, load,
                    city: (.locations[0].country.city.name // ""),
                    pub: ([.technologies[] | select(.identifier == "wireguard_udp") | .metadata[]? | select(.name == "public_key") | .value][0] // "")}
-             | select(.pub != "")')
+             | select(.pub != "")') || exit 1
 where="${want_city:+$want_city, }$cname"
 [ -n "$recs" ] || die "Nord recommends no WireGuard servers in $where"
 server=""
@@ -237,9 +238,8 @@ note=""
 echo "$out: $state, $host, $place$note"
 
 echo
-here="$HERE"
 case "$kind/$role" in
     server/*)       echo "Next: wgt-ctl $holder jump-add   (adds it to $holder as jump $code)" ;;
-    device/carrier) echo "Next: $here/tunnel.sh import (this Mac; it sweeps carriers/ first) or $here/singbox.sh build $holder" ;;
-    device/config)  echo "Next: $here/tunnel.sh import (this Mac), $here/singbox.sh build $holder, or $here/qr.sh $holder $name" ;;
+    device/carrier) echo "Next: $HERE/tunnel.sh import (this Mac; it sweeps carriers/ first) or $HERE/singbox.sh build $holder" ;;
+    device/config)  echo "Next: $HERE/tunnel.sh import (this Mac), $HERE/singbox.sh build $holder, or $HERE/qr.sh $holder $name" ;;
 esac

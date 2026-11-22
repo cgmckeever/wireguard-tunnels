@@ -875,13 +875,10 @@ the two can't write over each other. A warped tunnel made from a
 wireguard-tools carrier keeps its `# wireguard-tools client:` line; that's
 fine, both sides go by the name.
 
-**Who writes what in `config/`.** It's the one copy every consumer reads: the
-WireGuard app ([qr.sh](#a-tunnel-as-a-qr-code)), `tunnel.sh import` and
-`singbox.sh build`. So a tunnel's settings, its keepalive included, are
-decided once, where the file is written (wireguard-tools, `nord.sh` and the
-sweep each write `PersistentKeepalive = 25`), and every consumer passes them
-through. The one exception is a sing-box group, which drops keepalives
-because it runs every tunnel at once.
+**Who writes what in `config/`.** wireguard-tools, `nord.sh` and the sweep
+each write a tunnel with `PersistentKeepalive = 25`, and the WireGuard app,
+`tunnel.sh` and sing-box run it as written (a sing-box group alone drops
+keepalives: it runs every tunnel at once). `CLAUDE.md` has the full contract.
 
 **Backups.** When wgt-ctl replaces or removes a config, the old one becomes
 `<name>.conf.<time>.bak`. Everything here reads only `*.conf`, so backups are
@@ -914,9 +911,10 @@ whichever `python3` is first on your `PATH`). The three are links to
 `scripts/_python.sh`, which runs the module for the name it was called by.
 `tunnel.sh`, `nord.sh`, `qr.sh` and `install.sh` stay shell: `tunnel.sh` is
 the root daemon, installed as one file, so it can't load code from the repo.
-`nord.sh` and `qr.sh` share `scripts/_lib.sh` (the device picker, the store's
-paths, `die`, help); install.sh asks `wgtun/forinstall.py` for the store's steps
-(folders, the WARP account, the daemon's `warp.conf`), so they're done once.
+`nord.sh`, `qr.sh` and install.sh share `scripts/_lib.sh` (the device picker,
+the store's paths, `die`, help); install.sh asks `wgtun/forinstall.py` for the
+store's steps (device names, folders, the WARP account, the daemon's
+`warp.conf`) and installs the daemon with `tunnel.sh update`, so each is done once.
 
 | File | What |
 |------|------|
@@ -931,8 +929,8 @@ The sweep and `build` each have a `plan()` that changes nothing; `check.sh`
 compares their plans with the disk.
 
 `./test.sh` runs the tests (each builds its own store in a temp folder, with
-fake keys); `./test.sh lint` runs ruff and mypy, and `bash -n` (plus
-shellcheck, if it's installed) on every shell script; `./test.sh all` both. The
+fake keys); `./test.sh lint` runs ruff and mypy, and `bash -n` (macOS's bash
+3.2) on every shell script; `./test.sh all` both. The
 first run makes `.venv/` with pytest, ruff and mypy, on macOS's Python 3.9
 when it's there (the oldest the scripts must run on). `./test.sh hooks` has git
 run `./test.sh all` before each commit (`.githooks/pre-commit`), and GitHub

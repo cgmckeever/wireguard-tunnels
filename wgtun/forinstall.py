@@ -1,6 +1,7 @@
 """What install.sh asks of wgtun, so it reads and writes the store as the
 sweep and singbox.sh do. Each prints install.sh's "ok"/"changed" lines.
 
+  python3 -m wgtun.forinstall device-name <name>              nothing, or why a device can't be called that
   python3 -m wgtun.forinstall warp-endpoint <device dir>       the WARP endpoint (or why .warp-endpoint is wrong)
   python3 -m wgtun.forinstall folders <dir>...                 each a 0700 folder
   python3 -m wgtun.forinstall warp-account <device dir>        the device's WARP account and profile in warp/
@@ -55,6 +56,12 @@ PersistentKeepalive = {KEEPALIVE}
 """
 
 
+def device_name(args: List[str]) -> List[str]:
+    if not store.valid_device(args[0]):
+        raise Error(f"Device names are letters, digits, . _ - (not starting with .): {args[0]}")
+    return []
+
+
 def warp_endpoint(args: List[str]) -> List[str]:
     return [store.warp_endpoint(args[0])]
 
@@ -78,8 +85,9 @@ def write_daemon_warp(args: List[str]) -> List[str]:
 
 
 COMMANDS: Dict[str, Callable[[List[str]], List[str]]] = {
-    "warp-endpoint": warp_endpoint, "folders": folders, "warp-account": warp_account, "daemon-warp": write_daemon_warp}
-ARGS = {"warp-endpoint": 1, "warp-account": 1, "daemon-warp": 2}       # folders takes any number
+    "device-name": device_name, "warp-endpoint": warp_endpoint, "folders": folders,
+    "warp-account": warp_account, "daemon-warp": write_daemon_warp}
+ARGS = {"device-name": 1, "warp-endpoint": 1, "warp-account": 1, "daemon-warp": 2}       # folders takes any number
 
 
 def main(argv: Optional[List[str]] = None) -> int:
