@@ -229,7 +229,7 @@ def private_dir(path: str) -> bool:
 def wgcf(folder: str, *args: str) -> None:
     """wgcf, its chatter (a device table) shown only if it fails."""
     if not shutil.which("wgcf"):
-        raise Error("wgcf missing (install.sh --sing-box, or brew install wgcf)")
+        raise Error("wgcf missing (brew install wgcf)")
     run = subprocess.run(["wgcf", *args], cwd=folder, capture_output=True, text=True)
     if run.returncode != 0:
         print(run.stdout + run.stderr, file=sys.stderr, end="")

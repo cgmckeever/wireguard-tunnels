@@ -391,8 +391,8 @@ cmd_import_root() {
         # handshakes at once, and a stale handshake means trouble (the watchdog).
         # The sweep's warp.<device>.conf has one already: this is for a folder
         # imported from elsewhere.
-        if same_key "$f" "$WARP_SRC" && ! grep -qi '^[[:space:]]*PersistentKeepalive' "$tmp"; then
-            sed -i '' -E 's/^([[:space:]]*Endpoint[[:space:]]*=.*)$/\1\
+        if same_key "$f" "$WARP_SRC" && ! has_keepalive "$tmp"; then
+            sed -i '' -E '/^[[:space:]]*[Pp]ersistent[Kk]eepalive[[:space:]]*=/d; s/^([[:space:]]*Endpoint[[:space:]]*=.*)$/\1\
 PersistentKeepalive = 25/' "$tmp"
         fi
         state=$(settle "$tmp" "$out")
@@ -505,12 +505,14 @@ arm() {
         was=$(cat "$RUN/armed")
         [ "$was" = "$g" ] && return
         log "kill switch: WARP guard ${was:-none} -> ${g:-none}"
+        # The new guard first: the endpoint is never unguarded
+        [ -n "$g" ] && add_routes 127.0.0.1 -reject -- "$g"
         [ -n "$was" ] && del_routes "$was"
     else
         log "kill switch on"
         add_routes 127.0.0.1 -reject -- $V4_HALVES $V6_HALVES
+        [ -n "$g" ] && add_routes 127.0.0.1 -reject -- "$g"
     fi
-    [ -n "$g" ] && add_routes 127.0.0.1 -reject -- "$g"
     put "$RUN/armed" "$g"
 }
 
@@ -826,11 +828,14 @@ write_status() {
 }
 
 cmd_daemon() {
-    local req applied="" tick=0
+    local req applied="" tick=0 g
     need_root daemon
     DAEMON=1 NET_GW=$(gateway)
     mkdir -p "$RUN" "$STATE" && chmod 755 "$RUN" "$STATE"
-    rm -f "$RUN/armed" "$RUN/current"   # routes don't survive a reboot; a restart re-applies
+    # Routes don't survive a reboot, but do a restart: take off the WARP guard
+    # recorded, since what re-applies may guard another endpoint
+    g=$(cat "$RUN/armed" 2>/dev/null); [ -n "$g" ] && del_routes "$g"
+    rm -f "$RUN/armed" "$RUN/current"   # a restart re-applies what's wanted
     log "daemon start"
     while true; do
         resume_if_due
@@ -1145,6 +1150,9 @@ stop_app_tunnels() {
 
 # Follow the daemon's progress on our request (its first line is "req <id>")
 # until ok/fail
+# ask <request...>: hand the daemon a request (as root), then follow it to the end
+ask() { root request "$@" || return 1; follow "$(cat "$RUN/request")"; }
+
 follow() {
     local req="$1" seen=1 n line i=0
     printf 'Waiting for the daemon '

@@ -5,7 +5,7 @@
 # The sourcing script sets SELF to its own path, links resolved:
 #   SELF=$(readlink -f "$0"); . "$(dirname "$SELF")/_lib.sh"
 
-PROG=$(basename "$0")
+PROG=$(basename "$SELF")                        # nord.sh, qr.sh: through a link too
 HERE=$(dirname "$SELF")                         # the repo's scripts/
 WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"    # the store shared with wireguard-tools
 DEVICES="$WG_TUNNELS/devices"

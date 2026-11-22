@@ -203,7 +203,7 @@ fi
 # goes to curl as a config file (a pipe), never as an argument: any user on
 # the Mac can read another's arguments in ps.
 key=$(api users/services/credentials --config <(printf 'user = "token:%s"\n' "$(tr -d ' \t\r\n"' < "$TOKEN_FILE")") \
-    | jq -r '.nordlynx_private_key // empty') || exit 1
+    | jq -r '.nordlynx_private_key // empty') || die "no NordLynx key (is the token in $TOKEN_FILE still valid?)"
 [ -n "$key" ] || die "no NordLynx key (is the token in $TOKEN_FILE still valid?)"
 
 # 9. Write it (only if it changed)

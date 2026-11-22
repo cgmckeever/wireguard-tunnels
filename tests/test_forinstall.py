@@ -66,3 +66,11 @@ def test_usage(args, capsys):
     with pytest.raises(SystemExit):
         forinstall.main(args)
     assert capsys.readouterr().err.startswith("install.sh: usage: python3 -m wgtun.forinstall ")
+
+
+def test_warp_account_left_from_an_earlier_one(tmp_store, capsys, fake_wgcf):
+    """A profile with no account (the account was removed): registering again
+    replaces it, so the profile is the new account's."""
+    tmp_store.put("devices/mac/warp/wgcf-profile.conf", "old\n")
+    run(capsys, "warp-account", tmp_store.path("devices/mac"))
+    assert tmp_store.read("devices/mac/warp/wgcf-profile.conf").startswith("[Interface]")

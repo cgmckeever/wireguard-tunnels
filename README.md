@@ -81,7 +81,7 @@ device never talks to it, and nothing changes how the Mac itself connects.
 
 ## Quick start
 
-On your Mac (macOS and [Homebrew](https://brew.sh) needed):
+On your Mac (macOS 12.3 or later, and [Homebrew](https://brew.sh)):
 
 1. **Get the scripts.**
    ```sh

@@ -37,8 +37,11 @@ def functions(*names: str) -> str:
     return "\n".join(out)
 
 
+BASH = "/bin/bash" if os.path.exists("/bin/bash") else "bash"     # macOS's 3.2 runs #!/bin/bash scripts
+
+
 def bash(defs: str, call: str, *args: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["bash", "-c", f"{defs}\n{call}", "_", *args], capture_output=True, text=True)
+    return subprocess.run([BASH, "-c", f"{defs}\n{call}", "_", *args], capture_output=True, text=True)
 
 
 def swept_ok(conf: str, warp_host: str) -> subprocess.CompletedProcess:
