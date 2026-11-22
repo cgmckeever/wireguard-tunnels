@@ -172,6 +172,13 @@ render() {
 # tools_issued <conf>: wireguard-tools delivered it; only wgt-ctl replaces it
 tools_issued() { grep -q '^# wireguard-tools client:' "$1"; }
 
+# swept_output <conf>: written by this sweep, its AllowedIPs carrying the WARP
+# endpoint. A carrier from wireguard-tools passes its header comment on to the
+# warped config, so that comment alone doesn't make the warped one tools-issued.
+swept_output() {
+    grep -qiE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_NET//./\\.}([[:space:]]*,.*)?[[:space:]]*$" "$1"
+}
+
 endpoint_of() {
     awk -F'[[:space:]]*=[[:space:]]*' 'tolower($0) ~ /^[[:space:]]*endpoint[[:space:]]*=/ {print $2; exit}' "$1"
 }
@@ -203,9 +210,10 @@ app_action() {
 
 # place <tmp> <out>: move tmp into place unless out already says the same;
 # prints new, updated or unchanged. A config wireguard-tools issued (its
-# "# wireguard-tools client:" line) is never replaced: it stops instead.
+# "# wireguard-tools client:" line) is never replaced: it stops instead. The
+# sweep's own output (swept_output) is not one, whatever its comments say.
 place() {
-    if [ -f "$2" ] && tools_issued "$2"; then
+    if [ -f "$2" ] && tools_issued "$2" && ! swept_output "$2"; then
         rm -f "$1"; die "$(basename "$2") was issued by wireguard-tools: not replacing it (rename the carrier)"
     fi
     if [ -f "$2" ] && cmp -s "$1" "$2"; then rm -f "$1"; echo unchanged; return; fi
@@ -260,15 +268,20 @@ for raw in "${raws[@]}"; do
 done
 
 # warp.<device>: the device's WARP alone (no carrier), as a plain config, on
-# the same endpoint as the warped tunnels. tunnel.sh import takes it as a full
-# tunnel (one tunnel at a time, so its key never runs twice); singbox.sh build
-# skips it and makes its own from warp/.
+# the same endpoint as the warped tunnels, with a keepalive like every other
+# one-tunnel config. tunnel.sh import takes it as a full tunnel (one tunnel at
+# a time, so its key never runs twice); singbox.sh build skips it and makes
+# its own from warp/.
 if [ -f "$DIR/warp/wgcf-profile.conf" ]; then
     name="warp.$DEVICE"; out="$CONFIG_DIR/$name.conf"
     names+="$name "
     tmp=$(mktemp "$CONFIG_DIR/.render.XXXXXX") || die "mktemp failed in $CONFIG_DIR"
-    sed -E "s/^([[:space:]]*[Ee][Nn][Dd][Pp][Oo][Ii][Nn][Tt][[:space:]]*=[[:space:]]*).*/\1$WARP_ENDPOINT/" \
-        "$DIR/warp/wgcf-profile.conf" > "$tmp" || { rm -f "$tmp"; die "can't render $DIR/warp/wgcf-profile.conf"; }
+    awk -v ep="$WARP_ENDPOINT" '
+        { sub(/\r$/, ""); l = tolower($0) }
+        l ~ /^[[:space:]]*persistentkeepalive[[:space:]]*=/ { next }
+        l ~ /^[[:space:]]*endpoint[[:space:]]*=/ { print "Endpoint = " ep; print "PersistentKeepalive = 25"; next }
+        { print }
+    ' "$DIR/warp/wgcf-profile.conf" > "$tmp" || { rm -f "$tmp"; die "can't render $DIR/warp/wgcf-profile.conf"; }
     state=$(place "$tmp" "$out") || exit 1
     row "$name" "$state" "(WARP alone, a plain tunnel)"
 fi
@@ -279,7 +292,7 @@ fi
 for out in "$CONFIG_DIR"/*.conf; do
     name=$(basename "$out" .conf)
     case "$names" in *" $name "*) continue ;; esac
-    if grep -qiE "^[[:space:]]*AllowedIPs[[:space:]]*=[[:space:]]*${WARP_NET//./\\.}([[:space:]]*,.*)?[[:space:]]*$" "$out"; then
+    if swept_output "$out"; then
         row "$name" "orphan" "(no usable carrier in carriers/: left in place)"
     else
         row "$name" "manual" "$(app_action "$name" "$(endpoint_of "$out")" "unchanged")"

@@ -671,7 +671,9 @@ costs:
 - a server can't reach the device through an idle tunnel;
 - the whole VPN runs at the smallest MTU of any tunnel in it.
 
-A one-tunnel profile keeps the config's keepalive and its own MTU.
+A one-tunnel profile keeps its own MTU and its keepalives: the config's (as the
+WireGuard app and `tunnel.sh` get it; `build` warns about a config without one),
+and 25s for WARP, as everywhere else.
 
 ### Getting a profile to the device
 

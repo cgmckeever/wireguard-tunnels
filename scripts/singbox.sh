@@ -160,7 +160,9 @@ warped_name() {
 # arguments: any user on the Mac can read another's arguments in ps. ---
 
 # endpoint_json <conf> <tag> <mtu>: a sing-box WireGuard endpoint from a
-# config (a swept carrier, or a plain tunnel), keepalive included
+# config (a swept carrier, or a plain tunnel), with the config's keepalive as
+# it stands: config/ is what the WireGuard app (qr.sh) and tunnel.sh get too,
+# so all three agree (stage_group takes keepalives out of groups)
 endpoint_json() {
     local conf="$1" ep host port ka
     ep=$(conf_val "$conf" Endpoint)
@@ -179,8 +181,10 @@ endpoint_json() {
 
 # warp_json <WARP profile> <tag> <carrier tag> <mtu>: WARP, carried by the
 # carrier (or straight from the device's network when the carrier tag is "").
-# No keepalive: every WARP tunnel on a device shares its one WARP key, so only
-# the one in use may talk to Cloudflare.
+# Keepalive 25s, as install.sh, tunnel.sh and the sweep's warp.<device>.conf
+# give WARP. Every WARP tunnel on a device
+# shares its one WARP key, so only the one in use may talk to Cloudflare:
+# fine in a one-tunnel profile, and stage_group takes it out of groups.
 warp_json() {
     KEY=$(conf_val "$1" PrivateKey) \
     jq -n --arg tag "$2" --arg detour "$3" --argjson mtu "$4" \
@@ -189,7 +193,7 @@ warp_json() {
         { type: "wireguard", tag: $tag, mtu: $mtu, address: $address, private_key: env.KEY }
         + (if $detour != "" then { detour: $detour } else {} end)
         + { peers: [ { address: $host, port: $port, public_key: $pub,
-                       allowed_ips: ["0.0.0.0/0", "::/0"] } ] }'
+                       allowed_ips: ["0.0.0.0/0", "::/0"], persistent_keepalive_interval: 25 } ] }'
 }
 
 # route_rules <outbound> [cidr...]: a JSON list with a rule sending the cidrs
@@ -238,6 +242,8 @@ add_plain() {
     local eps
     conf_list "$1" AllowedIPs | grep -qxF 0.0.0.0/0 \
         || echo "warning: $2 is a split tunnel (no 0.0.0.0/0): in sing-box it takes all traffic, and only its own networks work" >&2
+    [[ "$(conf_val "$1" PersistentKeepalive)" =~ ^[1-9][0-9]*$ ]] \
+        || echo "warning: $2 has no PersistentKeepalive: its one-tunnel profile has none (nor the WireGuard app's or tunnel.sh's copy); add one to $(basename "$1")" >&2
     eps=$(endpoint_json "$1" "$2" "$3" | jq -sc .) || die "can't read $1"
     unit_add "$2" "$eps" '[]' "$3"
 }
@@ -277,8 +283,9 @@ key_lines() {
 # devices on one key knock each other off). Names the files, never the key.
 #
 # A key used twice on one device (a carrier copied from a config in config/,
-# say) only gets a note: a device runs one tunnel at a time, and the composite
-# profile has no keepalives, so only the tunnel in use talks to its server.
+# say) only gets a note: a device runs one tunnel at a time (one profile at a
+# time in the app, and groups have no keepalives), so only the tunnel in use
+# talks to its server.
 check_keys() {
     local dir="$1" d others=() dup self
     shift
@@ -470,7 +477,7 @@ cmd_build() {
     out="$dir/sing-box"
     mkdir -p "$out" && chmod 700 "$out" || die "can't create $out"
     echo "== Profiles in $out"
-    # One per tunnel, with the configs' keepalives: only one runs at a time
+    # One per tunnel, with keepalives (the config's; WARP's 25s): only one runs at a time
     for i in "${!tags[@]}"; do
         out="${tags[i]}.json"
         # <<<, not a pipe: stage_profile records its temp file in this shell
