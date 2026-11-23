@@ -171,7 +171,7 @@ def units(dev: Device, swept: sweep.Sweep, say: Say) -> List[Unit]:
     # What the sweep writes this run: warped tunnels with a carrier it could
     # use, and WARP alone when warp/ has a usable profile (not a stale copy)
     usable = {r.name for r in swept.written()}
-    warp = next((c for c in configs if c.name == store.warp_alone(dev.name) and c.name in usable), None)
+    warp = next((c for c in configs if store.is_warp_alone(c.name, dev.name) and c.name in usable), None)
     out: List[Unit] = []
     seen_cidrs: Set[str] = set()
     for c in [c for c in configs if store.is_warped(c.name)] + \

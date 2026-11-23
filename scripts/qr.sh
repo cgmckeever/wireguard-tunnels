@@ -48,7 +48,5 @@ grep -qi '^[[:space:]]*\[Interface\]' "$conf" && grep -qi '^[[:space:]]*PrivateK
 echo
 qrencode -t ansiutf8 < "$conf" || die "qrencode failed"
 echo "$tunnel ($device): scan in the WireGuard app, + > Create from QR code"
-case "$tunnel" in
-    warped.*) echo "note: $tunnel only carries WARP; alone in the WireGuard app it does nothing (use sing-box)" ;;
-esac
+is_warped "$tunnel" && echo "note: $tunnel only carries WARP; alone in the WireGuard app it does nothing (use sing-box)"
 echo "It holds the private key: clear the terminal when done (Cmd-K)"

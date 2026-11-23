@@ -48,3 +48,7 @@ pick() {
     for i; do [ "$i" = "$choice" ] && { echo "$i"; return; }; done
     die "no ${what} '${choice}'"
 }
+
+# is_warped <name>: a tunnel that carries WARP, by its "warped." prefix in any case
+# (the Mac's file system ignores case; wgtun's store.is_warped, tunnel.sh's own copy)
+is_warped() { case "$(tr '[:upper:]' '[:lower:]' <<< "$1")" in warped.*) return 0 ;; esac; return 1; }

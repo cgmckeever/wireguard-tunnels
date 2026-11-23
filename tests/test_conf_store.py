@@ -87,6 +87,9 @@ def test_sweep_owned_by_name():
     assert store.sweep_owned("warp.iphone", "iphone")
     assert not store.sweep_owned("warp.mbp-1", "iphone")
     assert not store.sweep_owned("dengar.warp.iphone", "iphone")
+    # In any case: the Mac's file system ignores it (wireguard-tools refuses these too)
+    assert store.sweep_owned("Warped.x.iphone", "iphone") and store.sweep_owned("WARP.iPhone", "iphone")
+    assert store.warped_name("Warped.x.conf", "iphone") == "warped.x.iphone"
 
 
 def test_collated_is_the_shells_order(monkeypatch):

@@ -13,11 +13,17 @@ the behavior; this file says how to change it without tangling it again.
     pass them through.
   - The one exception is a sing-box group. It drops keepalives because it
     runs every tunnel at once.
-- **Ownership goes by name.**
+- **Ownership goes by name, without case** (the Mac's file system ignores
+  it: `Warped.x` is the file the sweep writes as `warped.x`). One rule:
+  `store.is_warped`, `is_warp_alone` and `sweep_owned`, with copies in
+  `tunnel.sh` and `_lib.sh` (`is_warped`), and wireguard-tools'
+  `tunnels.sweep_owned`; both repos' tests pin the same examples.
   - The sweep writes `config/warped.*` and `config/warp.<device>.conf`.
   - wireguard-tools writes `<server>.<config>.conf`, and never touches
-    `warped.*` or `warp.<device>.conf` (in any case). It delivers them after
-    a client change, `device rename`, `sync`, `setup`, `restore` and `move`.
+    `warped.*` or `warp.<device>.conf`. It delivers them after a client
+    change, `device rename`, `jump add`, `sync`, `setup`, `restore` and
+    `move`, byte for byte, and keeps them UTF-8 (a config that isn't is
+    refused here: `conf.read_text`).
   - `nord.sh` writes `nord.<cc>[.<city>].conf`, and rewrites only a file
     with a `# source: nord` line.
   - `tunnel.sh extract` is the exception that goes by a line, not a name: it
@@ -31,7 +37,7 @@ the behavior; this file says how to change it without tangling it again.
   code from this user-writable repo.
   - Its copies of shared rules are pinned to `wgtun/` by
     `tests/test_tunnel_sh.py`: keepalive 25, WARP's MTU and 80-byte
-    overhead, the `warped.` prefix, WARP alone's name, device names, what a
+    overhead, the `warped.` prefix (in any case, `_lib.sh`'s too), WARP alone's name, device names, what a
     swept config looks like, and how a config value is read. `nord.sh`'s
     keepalive is pinned there too.
 - **The menu bar plugin reads what `tunnel.sh` leaves.** That's `$RUN/*`

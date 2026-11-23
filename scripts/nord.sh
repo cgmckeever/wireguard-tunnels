@@ -151,7 +151,7 @@ source_line="# source: nord $cc${want_city:+ $slug}"
 taken=" "
 for f in "$DEVICES"/*/{carriers,config}/*.conf "$WG_TUNNELS"/servers/*/carriers/*.conf; do
     [ "$f" = "$out" ] && continue
-    [ "$kind/$role" = device/carrier ] && [[ "$f" == "$base/$holder/config/warped."* ]] \
+    [ "$kind/$role" = device/carrier ] && [ "${f%/*}" = "$base/$holder/config" ] && is_warped "${f##*/}" \
         && grep -qxF "$source_line" "$f" && continue
     is_nord "$f" && taken+="$(endpoint_ip "$f") "
 done

@@ -149,9 +149,25 @@ def test_ipv6_found_on_any_address_line():
     assert check.replace('"$1"', '"$CONF/$1.conf"') in source()      # what take_traffic runs
 
 
-def test_qr_sh_knows_a_warped_tunnel_by_the_same_prefix():
-    with open(os.path.join(store.SCRIPTS, "qr.sh"), encoding="utf-8") as f:
-        assert f"    {store.WARPED}*)" in f.read()
+WARPED_NAMES = ["warped.x.iphone", "Warped.x.iphone", "WARPED.X", "warped-x.iphone", "x.warped.iphone",
+                "warp.iphone", "warped", ""]
+
+
+@pytest.mark.parametrize("name", WARPED_NAMES)
+def test_both_bash_copies_know_a_warped_tunnel_as_wgtun_does(name):
+    """tunnel.sh's own is_warped, and _lib.sh's (nord.sh, qr.sh): the prefix in any case."""
+    with open(os.path.join(store.SCRIPTS, "_lib.sh"), encoding="utf-8") as f:
+        lib = re.search(r"^is_warped\(\) \{[^\n]*\}$", f.read(), re.M)
+    assert lib, "is_warped is gone from _lib.sh"
+    for defs in (f"TUNNEL_PREFIX={store.WARPED}\n" + functions("is_warped"), lib.group(0)):
+        assert (bash(defs, 'is_warped "$1"', name).returncode == 0) == store.is_warped(name), defs
+
+
+def test_qr_sh_and_nord_sh_use_libs_is_warped():
+    for script in ("qr.sh", "nord.sh"):
+        with open(os.path.join(store.SCRIPTS, script), encoding="utf-8") as f:
+            text = "\n".join(line for line in f if not line.lstrip().startswith("#"))
+        assert "is_warped " in text and "warped.*" not in text and '"warped."' not in text, script
 
 
 TOOLS_LINE = "# wireguard-tools client: mbp-1 on dengar"
@@ -159,10 +175,11 @@ TOOLS_LINE = "# wireguard-tools client: mbp-1 on dengar"
 
 @pytest.mark.parametrize("name,line,kept", [("dengar.mbp-1.conf", TOOLS_LINE, True),
                                             ("warped.dengar.mbp-1.conf", TOOLS_LINE, False),
+                                            ("Warped.dengar.mbp-1.conf", TOOLS_LINE, False),
                                             ("nord.us.conf", "# source: nord us", False)])
 def test_extract_keeps_only_wireguard_tools_own(tmp_path, name, line, kept):
     """A warped.* config carries its carrier's tools line, but it's the sweep's to write."""
     path = tmp_path / name
     path.write_text(f"{line}\n[Interface]\n")
     call = f'TUNNEL_PREFIX={store.WARPED}; tools_copy "$1"'
-    assert (bash(functions("tools_copy"), call, str(path)).returncode == 0) == kept
+    assert (bash(functions("is_warped", "tools_copy"), call, str(path)).returncode == 0) == kept

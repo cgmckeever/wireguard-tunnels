@@ -136,7 +136,14 @@ def all_devices() -> List[str]:
 # --- names and numbers ---
 
 def is_warped(name: str) -> bool:
-    return name.startswith(WARPED)
+    """A tunnel that carries WARP, by its name's prefix in any case: the Mac's file
+    system ignores case, so Warped.x is the file the sweep writes as warped.x."""
+    return name[:len(WARPED)].lower() == WARPED
+
+
+def is_warp_alone(name: str, device: str) -> bool:
+    """<name> is the device's WARP-only tunnel, in any case (as is_warped)."""
+    return name.lower() == warp_alone(device).lower()
 
 
 def warped_name(carrier: str, device: str) -> str:
@@ -144,7 +151,7 @@ def warped_name(carrier: str, device: str) -> str:
     warped.x.conf and warped-x.conf all become warped.x.<device>, and a device
     elsewhere in the name, as a word of its own (between . _ - or the ends),
     moves to the end (x_<device>-y becomes warped.x-y.<device>)."""
-    n = re.sub(r"^warped[.-]", "", stem(carrier))
+    n = re.sub(r"^warped[.-]", "", stem(carrier), flags=re.I)
     d = re.escape(device)
     while True:
         m = re.fullmatch(rf"(.*)([._-]){d}([._-].*)", n)
@@ -165,9 +172,10 @@ def warp_alone(device: str) -> str:
 
 
 def sweep_owned(name: str, device: str) -> bool:
-    """The sweep writes these config/ names; wireguard-tools never does (it
-    names its files <server>.<config>) and leaves warped.* alone."""
-    return is_warped(name) or name == warp_alone(device)
+    """The sweep writes these config/ names, in any case (the Mac's file system
+    ignores it); wireguard-tools never does (it names its files <server>.<config>)
+    and leaves them alone (its tunnels.sweep_owned: the same rule)."""
+    return is_warped(name) or is_warp_alone(name, device)
 
 
 def warp_endpoint(folder: str) -> str:

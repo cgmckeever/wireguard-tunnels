@@ -80,6 +80,9 @@ INSTALLED="/usr/local/sbin/wg-tunnels"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
 LOG="/var/log/wg-tunnels.log"
 TUNNEL_PREFIX="warped."
+# is_warped <name>: a tunnel that carries WARP, by its prefix in any case (the
+# Mac's file system ignores case: Warped.x is the file the sweep writes as warped.x)
+is_warped() { case "$(tr '[:upper:]' '[:lower:]' <<< "$1")" in "$TUNNEL_PREFIX"*) return 0 ;; esac; return 1; }
 
 for PREFIX in /opt/homebrew /usr/local; do
     [ -x "$PREFIX/bin/wg-quick" ] && break
@@ -271,7 +274,7 @@ swept_ok() {  # swept_ok <conf> <warp-endpoint>
 # wg ignores the address bits, e.g. 192.168.1.0/0 — or the two /1 halves), or split
 kind_of() {
     local ips
-    case "$1" in "$TUNNEL_PREFIX"*) echo warped; return ;; esac
+    is_warped "$1" && { echo warped; return; }
     ips=$(list_of "$2" AllowedIPs)
     if grep -qxE '[0-9.]+/0' <<< "$ips" \
         || { grep -qx '0\.0\.0\.0/1' <<< "$ips" && grep -qx '128\.0\.0\.0/1' <<< "$ips"; }; then
@@ -1289,7 +1292,8 @@ cmd_rotate_warp() {
     # old keys: reconnect it
     active=$(st name)
     kind=$(st kind)
-    if [ -n "$active" ] && { [ "$kind" = warped ] || [ "$active" = "warp.$(basename "$(mac_dir)")" ]; }; then
+    if [ -n "$active" ] && { [ "$kind" = warped ] \
+        || [ "$(tr '[:upper:]' '[:lower:]' <<< "$active")" = "$(tr '[:upper:]' '[:lower:]' <<< "warp.$(basename "$(mac_dir)")")" ]; }; then
         echo "== Reconnect ${active}"
         ask up "$active"
     fi
@@ -1447,7 +1451,7 @@ status() {
 # line. A warped.* one has it too (copied from its carrier), but it's the
 # sweep's: it goes like the rest, and the next import writes it again.
 tools_copy() {
-    case "$(basename "$1")" in "$TUNNEL_PREFIX"*) return 1 ;; esac
+    is_warped "$(basename "$1")" && return 1
     grep -q "^# wireguard-tools client:" "$1"
 }
 
