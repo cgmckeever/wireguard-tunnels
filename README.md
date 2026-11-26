@@ -2,7 +2,18 @@
 
 *Cloudflare exit IPs, tunneled through your WireGuard region*
 
-## What it does
+## Contents
+
+- [Overview](#overview): [terms](#terms), [two ways to run it](#two-ways-to-run-it)
+- [Quick start](#quick-start): [install.sh](#installsh), [conventions](#conventions)
+- [Your folders](#your-folders): [devices](#devices), [servers](#servers), [keys](#keys); [warped tunnels](#warped-tunnels) and the sweep
+- [Local Mac Tunnels](#local-mac-tunnels): [`tunnel.sh`](#tunnelsh), [the menu bar lock](#menu-bar-optional), [how it works](#how-it-works), [uninstall](#uninstall)
+- [Sing-Box Device Tunnels](#sing-box-device-tunnels): [which profile](#which-profile-to-import), [getting it to the device](#getting-a-profile-to-the-device), [`singbox.sh`](#singboxsh)
+- [QR codes](#a-tunnel-as-a-qr-code), [NordVPN](#nordvpn), [the folder shared with wireguard-tools](#shared-folder), [checking the store](#checking-the-store)
+- [Troubleshooting](TROUBLESHOOTING.md)
+- [Developing](#developing)
+
+## Overview
 
 It runs Cloudflare WARP inside a WireGuard tunnel. The WireGuard tunnel (the
 *carrier*) goes to a server you pick, a VPN provider's or your own; WARP rides
@@ -13,10 +24,6 @@ your location:
 device ──WireGuard (carrier)──▶ carrier server ──WARP──▶ Cloudflare ──▶ sites
          (WARP inside it)       (sees only encrypted WARP)   (exit IP)
 ```
-
-A carrier with WARP inside it is a *warped tunnel*. An ordinary WireGuard
-config, used as it is, is a *plain tunnel*; those work here too, alongside the
-warped ones.
 
 Either tunnel alone falls short:
 
@@ -54,7 +61,19 @@ you use it, the two share one folder: its client configs land with your
 devices' configs, and this repo can set up its servers' exits
 ([Servers](#servers)).
 
-## Two ways to run it
+### Terms
+
+- **Carrier:** an ordinary WireGuard config, from a VPN provider or your own
+  server, that WARP rides inside.
+- **Warped tunnel:** a carrier with WARP inside it, `warped.<name>.<device>`.
+  The *sweep* writes it from the carrier ([Warped tunnels](#warped-tunnels)).
+- **Plain tunnel:** any other WireGuard config, used as it is.
+- **WARP alone:** `warp.<device>`, the device's own WARP account with no
+  carrier.
+- **Device:** anything that runs tunnels (this Mac, a phone, an Apple TV). Each
+  has its own folder, keys and WARP account ([Devices](#devices)).
+
+### Two ways to run it
 
 There are two separate setups, one for this Mac and one for phones and other
 devices. Use either, or both:
@@ -104,10 +123,9 @@ On your Mac (macOS 12.3 or later, and [Homebrew](https://brew.sh)):
    on **phones, tablets or an Apple TV**: the Mac's own connection is left
    alone, and you can run the full install later.
 
-   Both make your folders ([Your folders](#your-folders)): 1 asks for this
-   Mac's device name (`mbp-1`, say), 2 for a first device (`iphone`, say).
-   To keep them somewhere other than `~/wg-tunnels`, set `WG_TUNNELS` in your
-   shell profile first.
+   Both make your folders: 1 asks for this Mac's device name (`mbp-1`, say),
+   2 for a first device (`iphone`, say). To keep them somewhere other than
+   `~/wg-tunnels`, see [Your folders](#your-folders) first.
 3. **Add your WireGuard configs.** The `.conf` files you download from
    your VPN provider or server go in the device's folder, in one of two
    places:
@@ -121,34 +139,12 @@ On your Mac (macOS 12.3 or later, and [Homebrew](https://brew.sh)):
    `config/warped.<name>.<device>.conf`, which is the one you run. Not sure
    which? Use `config/`. Each device needs configs made for it,
    not copies of another device's ([Keys](#keys)).
-4. **Use them.**
-   - This Mac: `tunnel.sh import`, then `tunnel.sh up`
+4. **Use them**, from the repo folder (or set up the aliases in
+   [Conventions](#conventions) first):
+   - This Mac: `scripts/tunnel.sh import`, then `scripts/tunnel.sh up`
      ([Mac quick start](#mac-quick-start)).
-   - A phone or Apple TV: `singbox.sh build <device>`, then open the profile
-     in the sing-box app ([sing-box quick start](#sing-box-quick-start)).
-
-The scripts run by path. `scripts/wgtun.sh` is one entry point for them:
-with no arguments it lists them, each with what it does, and asks which to
-run; `wgtun.sh <script> [args]` runs one (`wgtun.sh tunnel up`,
-`wgtun.sh nord`), and `wgtun.sh <script> -h` shows its commands. One alias
-covers it, e.g. in `~/.zshrc`:
-
-```sh
-alias wgtun=~/Documents/code/wireguard-tunnels/scripts/wgtun.sh
-```
-
-Or alias each script directly:
-
-```sh
-alias tunnel=~/Documents/code/wireguard-tunnels/scripts/tunnel.sh
-alias singbox=~/Documents/code/wireguard-tunnels/scripts/singbox.sh
-alias nord=~/Documents/code/wireguard-tunnels/scripts/nord.sh
-alias qr=~/Documents/code/wireguard-tunnels/scripts/qr.sh
-alias check=~/Documents/code/wireguard-tunnels/scripts/check.sh
-```
-
-From here on this README writes just the script name (`tunnel.sh`,
-`singbox.sh`, `nord.sh`, `qr.sh`, `wgwarp-sweep.sh`, `check.sh`).
+   - A phone or Apple TV: `scripts/singbox.sh build <device>`, then open the
+     profile in the sing-box app ([sing-box quick start](#sing-box-quick-start)).
 
 ### install.sh
 
@@ -172,6 +168,43 @@ for 2.
 | `--swiftbar` | Also the [menu bar lock](#menu-bar-optional): SwiftBar, the plugin, and a LaunchAgent that keeps SwiftBar running. Re-run with it to add the lock later |
 | `--no-daemon` | Skip the daemon step, for automation that can't answer a `sudo` prompt. Then run `tunnel.sh install`, or as root (e.g. Ansible `become`): `scripts/tunnel.sh _install <path/to/scripts/tunnel.sh>` |
 | `--sing-box` | Only what Sing-Box Device Tunnels need (above). Takes only `--device` |
+
+### Conventions
+
+- **Running the scripts:** they run by path. `scripts/wgtun.sh` is one entry
+  point for them: with no arguments it lists them, each with what it does, and
+  asks which to run; `wgtun.sh <script> [args]` runs one (`wgtun.sh tunnel up`,
+  `wgtun.sh nord`), and `wgtun.sh <script> -h` shows its commands. One alias
+  covers it, e.g. in `~/.zshrc`:
+
+  ```sh
+  alias wgtun=~/Documents/code/wireguard-tunnels/scripts/wgtun.sh
+  ```
+
+  Or alias each script directly:
+
+  ```sh
+  alias tunnel=~/Documents/code/wireguard-tunnels/scripts/tunnel.sh
+  alias singbox=~/Documents/code/wireguard-tunnels/scripts/singbox.sh
+  alias nord=~/Documents/code/wireguard-tunnels/scripts/nord.sh
+  alias qr=~/Documents/code/wireguard-tunnels/scripts/qr.sh
+  alias check=~/Documents/code/wireguard-tunnels/scripts/check.sh
+  ```
+
+  From here on this README writes just the script name (`tunnel.sh`,
+  `singbox.sh`, `nord.sh`, `qr.sh`, `wgwarp-sweep.sh`, `check.sh`).
+- **Safe to re-run:** `install.sh`, `import`, `build`, the sweep and
+  `nord.sh` change only what's missing or out of date, and say what they
+  changed.
+- **Scripts and AI agents (no terminal):** nothing waits on a prompt. Give
+  what it would ask: `install.sh --device <name>` (and `--no-daemon` where
+  `sudo` can't ask for a password), `tunnel.sh up <name>`, and the arguments
+  to `nord.sh` and `qr.sh`; `import` goes ahead without asking. A command
+  that needs an answer it wasn't given stops and says which. `sudo` still
+  needs a password, or a dialog (`SUDO_ASKPASS`, as the menu bar lock uses).
+- **Examples:** `mbp-1` is this Mac, `iphone` a sing-box device, `dengar` a
+  wireguard-tools server. `<mac>` stands for this Mac's device name, and
+  `<device>` for any device's.
 
 ## Your folders
 
@@ -291,12 +324,11 @@ too, so a new device has its `warp.<device>.conf` right away; on this Mac,
 again from its carrier (only when it changes). `x.conf`, `warped.x.conf` and
 `warped-x.conf` in `carriers/` all become `warped.x.<device>`, so keep only one: if
 there are several, one is used and the rest are reported as skipped. A carrier
-that isn't a one-peer WireGuard config is skipped too. Other files in
-`config/` are left alone: a
-`warped.*` file whose carrier is gone is reported as an *orphan* (delete it
-yourself), anything else (a plain tunnel) as *manual*. A carrier the sweep
-can't use is skipped with the reason (`2 [Peer] sections, needs one`, say): it
-needs what [build](#what-build-accepts-and-writes) needs.
+the sweep can't use is skipped with the reason (`2 [Peer] sections, needs one`,
+say): it needs what [build](#what-build-accepts-and-writes) needs. Other files
+in `config/` are left alone: a `warped.*` file whose carrier is gone is
+reported as an *orphan* (delete it yourself), anything else (a plain tunnel)
+as *manual*.
 
 ### Extras
 
@@ -382,7 +414,7 @@ Lost the network, or also using the WireGuard app? See
 
 | Command | What |
 |---------|------|
-| `up [n\|name]` | Asks `warped [Y/n]`, then which tunnel (Enter = the last one used, or the only one). A number picks from the warped list; a name skips both questions |
+| `up [n\|name]` | Asks `warped [Y/n]`, then which tunnel (Enter = the last one used, or the only one). A number picks from the warped list; a name skips both questions (and is needed with no terminal) |
 | `down` | Everything down, back to the normal connection |
 | `pause [min]` | For a hotel or café sign-in page: the tunnel down and the kill switch off for `min` minutes (default 10, up to 1440), then the daemon brings the tunnel back by itself, also after a reboot. Again while paused sets a new end time |
 | `resume` | End a pause now |
@@ -402,8 +434,8 @@ Lost the network, or also using the WireGuard app? See
 
 `up`, `down`, `pause`, `resume`, `import`, `rotate-warp`, `diag`, `update`,
 `install`, `uninstall` and `breakglass` use `sudo`. `up`, `down`, `pause`,
-`resume` and `import` also update the daemon first when the repo copy
-differs, as `update` does.
+`resume`, `import` and `rotate-warp` also update the daemon first when the
+repo copy differs, as `update` does.
 
 #### Tunnel kinds
 
