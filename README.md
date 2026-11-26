@@ -223,9 +223,10 @@ README writes `~/wg-tunnels` either way. The
 [menu bar lock](#menu-bar-optional) doesn't read it, so its Rotate WARP Keys
 and Export Diagnostics only work with the default location.
 
-It holds two kinds of folder: `devices/`, one per device that runs tunnels,
-and, only if you use wireguard-tools, `servers/`, one per server it runs,
-holding that server's exits.
+It holds `devices/`, one folder per device that runs tunnels, and, only if you
+use wireguard-tools, that repo's own folders: `servers/`, one per server it
+runs (its exits, and wireguard-tools' login and backups for it), `fleet/` and
+`pucks/`. This repo reads only `devices/` and each server's `carriers/`.
 
 ```
 ~/wg-tunnels/
@@ -238,6 +239,11 @@ holding that server's exits.
     iphone/        a sing-box device
   servers/         only with wireguard-tools
     dengar/        one of its servers
+      carriers/    its exits (below)
+      login        wireguard-tools' own (how wgt-ctl reaches it)
+      backups/     wireguard-tools' own (archives, private keys)
+  fleet/           wireguard-tools' own (device numbers)
+  pucks/           tunnel-puck's own (each puck's settings)
 ```
 
 ### Devices
