@@ -30,9 +30,9 @@
 #   --sing-box [--device <name>]
 #                 Only what Sing-Box Device Tunnels need: wgcf, jq (nord.sh),
 #                 qrencode (qr.sh), the store's devices/ and a first device
-#                 (asked, or --device; singbox.sh new makes more). No Local Mac Tunnels: no
-#                 WARP account for this Mac, no daemon, no sudo. Run it again
-#                 without --sing-box to add Local Mac Tunnels later
+#                 (asked, or --device; singbox.sh new makes more). No Local
+#                 Mac Tunnels: no WARP account for this Mac, no daemon, no
+#                 sudo. Run it again without --sing-box to add them later
 #
 # The WARP endpoint comes from <store>/devices/<device>/.warp-endpoint, else
 # <store>/.warp-endpoint (IPv4:port), else Cloudflare's default.
@@ -40,7 +40,7 @@
 set -u
 
 REPO=$(dirname "$(readlink -f "$0")")
-SELF="$REPO/install.sh"; . "$REPO/scripts/_lib.sh"   # WG_TUNNELS, DEVICES, DEFAULT_FILE, MAC, die, usage
+SELF="$REPO/install.sh"; . "$REPO/scripts/_lib.sh"   # WG_TUNNELS, DEVICES, DEFAULT_FILE, MAC, die, usage, folders
 SWIFTBAR_APP="/Applications/SwiftBar.app"
 SWIFTBAR_AGENT="$HOME/Library/LaunchAgents/com.local.swiftbar.plist"
 
@@ -162,7 +162,7 @@ umask 077    # until warp.conf is written: everything here holds private keys
 #       sing-box/    profiles from singbox.sh build, if you use sing-box here
 forinstall folders "$WG_TUNNELS" "$DEVICES" "$DEV_DIR" "$DEV_DIR/carriers" "$DEV_DIR/config" \
     "$DEV_DIR/exports" "$WARP_DIR" || exit 1
-if [ "$(cat "$DEFAULT_FILE" 2>/dev/null)" = "$device" ]; then
+if [ "$MAC" = "$device" ]; then
     ok "default device $device"
 else
     printf '%s\n' "$device" > "$DEFAULT_FILE" && chmod 644 "$DEFAULT_FILE" || die "Can't write $DEFAULT_FILE"
