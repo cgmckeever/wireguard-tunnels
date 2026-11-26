@@ -224,9 +224,9 @@ README writes `~/wg-tunnels` either way. The
 and Export Diagnostics only work with the default location.
 
 It holds `devices/`, one folder per device that runs tunnels, and, only if you
-use wireguard-tools, that repo's own folders: `servers/`, one per server it
-runs (its exits, and wireguard-tools' login and backups for it), `fleet/` and
-`pucks/`. This repo reads only `devices/` and each server's `carriers/`.
+use wireguard-tools, that repo's `fleet/` (its servers, each with its exits)
+and tunnel-puck's `pucks/`. This repo reads only `devices/` and each server's
+`login` and `carriers/`.
 
 ```
 ~/wg-tunnels/
@@ -237,12 +237,13 @@ runs (its exits, and wireguard-tools' login and backups for it), `fleet/` and
     .default       this Mac's device name, e.g. mbp-1 (Local Mac Tunnels only)
     mbp-1/         this Mac
     iphone/        a sing-box device
-  servers/         only with wireguard-tools
-    dengar/        one of its servers
-      carriers/    its exits (below)
-      login        wireguard-tools' own (how wgt-ctl reaches it)
-      backups/     wireguard-tools' own (archives, private keys)
-  fleet/           wireguard-tools' own (device numbers)
+  fleet/           only with wireguard-tools
+    servers/
+      dengar/      one of its servers
+        login      how wgt-ctl reaches it: a server with one is listed
+        carriers/  its exits (below)
+        backups/   wireguard-tools' own (archives, private keys)
+    devices        wireguard-tools' own (device numbers)
   pucks/           tunnel-puck's own (each puck's settings)
 ```
 
@@ -273,8 +274,9 @@ already there alone.
 ### Servers
 
 Only with wireguard-tools; skip this otherwise. It makes a folder in
-`servers/` for each server it manages, with a `carriers/` folder for that
-server's exits (wireguard-tools calls them *jumps*), one `.conf` each, and
+`fleet/servers/` for each server it manages, with a `login` file (the servers
+offered here are the ones with one) and a `carriers/` folder for that server's
+exits (wireguard-tools calls them *jumps*), one `.conf` each, and
 reads the exits from there. They're never tunnels on your devices.
 
 You can set them up here, by hand or with [`nord.sh`](#nordvpn). By hand,
@@ -854,9 +856,9 @@ or regions; in the US that's about one per state (Hawaii is Honolulu).
 nord.sh                                   # asks
 nord.sh device mbp-1 carrier us           # devices/mbp-1/carriers/nord.us.conf -> warped.nord.us.mbp-1
 nord.sh device iphone config ca           # devices/iphone/config/nord.ca.conf: a plain tunnel
-nord.sh server dengar us                  # servers/dengar/carriers/nord.us.conf: jump nd-us
+nord.sh server dengar us                  # fleet/servers/dengar/carriers/nord.us.conf: jump nd-us
 nord.sh device mbp-1 config us honolulu   # devices/mbp-1/config/nord.us.honolulu.conf
-nord.sh server dengar us "new york"       # servers/dengar/carriers/nord.us.new-york.conf: jump new-us
+nord.sh server dengar us "new york"       # fleet/servers/dengar/carriers/nord.us.new-york.conf: jump new-us
 ```
 
 - **One file per device or server and place** (a country, or a city in it). Running it
@@ -883,7 +885,7 @@ nord.sh server dengar us "new york"       # servers/dengar/carriers/nord.us.new-
 
 Only with [wireguard-tools](https://github.com/cgmckeever/wireguard-tools).
 It shares `~/wg-tunnels` with this repo: it reads each server's exits from
-`servers/<server>/carriers/` ([Servers](#servers)) and puts the client configs
+`fleet/servers/<server>/carriers/` ([Servers](#servers)) and puts the client configs
 it issues in `devices/<device>/config/` ([Devices](#devices)). Whichever runs
 first creates `~/wg-tunnels`, and both read its location from `$WG_TUNNELS`
 ([Your folders](#your-folders)).

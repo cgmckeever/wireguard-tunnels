@@ -17,7 +17,7 @@
 #                     turns it into warped.nord.<cc>[.<city>].<device> (Nord carries WARP)
 #   device, config    devices/<device>/config/nord.<cc>[.<city>].conf: a plain full
 #                     tunnel, Nord as the exit
-#   server            servers/<server>/carriers/nord.<cc>[.<city>].conf: an exit for
+#   server            fleet/servers/<server>/carriers/nord.<cc>[.<city>].conf: an exit for
 #                     wireguard-tools (wgt-ctl <server> jump-add), with a "# jump:
 #                     <code> <city, country> (Nord <server>)" line. The code is
 #                     nd-<cc>, or for a city its first letters and the country
@@ -77,9 +77,12 @@ shopt -s nullglob
 
 # 1. The holder: a device or a server
 kind=$(pick "device or server" "$1" device server) || exit 1
-if [ "$kind" = server ]; then base="$WG_TUNNELS/servers"; else base="$DEVICES"; fi
+# A server is one wireguard-tools lists: its folder has a login file.
+if [ "$kind" = server ]; then base="$WG_TUNNELS/fleet/servers"; else base="$DEVICES"; fi
 names=()
-while read -r n; do names+=("$n"); done < <(folders "$base")
+while read -r n; do
+    if [ "$kind" = device ] || [ -f "$base/$n/login" ]; then names+=("$n"); fi
+done < <(folders "$base")
 [ ${#names[@]} -gt 0 ] || die "no ${kind}s in $base"
 [ -n "$2" ] || [ ! -t 0 ] || echo "$([ "$kind" = server ] && echo Servers || echo Devices):" >&2
 holder=$(pick "$kind" "$2" "${names[@]}") || exit 1
@@ -149,7 +152,7 @@ fi
 # by that line, not by rebuilding the sweep's name for it)
 source_line="# source: nord $cc${want_city:+ $slug}"
 taken=" "
-for f in "$DEVICES"/*/{carriers,config}/*.conf "$WG_TUNNELS"/servers/*/carriers/*.conf; do
+for f in "$DEVICES"/*/{carriers,config}/*.conf "$WG_TUNNELS"/fleet/servers/*/carriers/*.conf; do
     [ "$f" = "$out" ] && continue
     [ "$kind/$role" = device/carrier ] && [ "${f%/*}" = "$base/$holder/config" ] && is_warped "${f##*/}" \
         && grep -qxF "$source_line" "$f" && continue
