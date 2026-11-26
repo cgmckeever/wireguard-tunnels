@@ -7,6 +7,7 @@
 #                             Y  pick a warped.* tunnel: it, then WARP inside it
 #                             n  pick any other tunnel and run it alone
 #                           Enter at a menu takes the last one used, or the only one.
+#                           A number picks from the warped list; a name, any tunnel.
 #   tunnel.sh down          Everything down, back to the normal connection
 #   tunnel.sh [status]      Tunnels, what's up, handshakes, the exit
 #   tunnel.sh list          Number the warped and other tunnels
@@ -82,7 +83,8 @@ LOG="/var/log/wg-tunnels.log"
 TUNNEL_PREFIX="warped."
 # is_warped <name>: a tunnel that carries WARP, by its prefix in any case (the
 # Mac's file system ignores case: Warped.x is the file the sweep writes as warped.x)
-is_warped() { case "$(tr '[:upper:]' '[:lower:]' <<< "$1")" in "$TUNNEL_PREFIX"*) return 0 ;; esac; return 1; }
+lower() { tr '[:upper:]' '[:lower:]' <<< "$1"; }
+is_warped() { case "$(lower "$1")" in "$TUNNEL_PREFIX"*) return 0 ;; esac; return 1; }
 
 for PREFIX in /opt/homebrew /usr/local; do
     [ -x "$PREFIX/bin/wg-quick" ] && break
@@ -335,6 +337,7 @@ cmd_import_root() {
         mkdir -p "$CONF" "$STATE" && chmod 700 "$CONF" && chmod 755 "$ETC" "$STATE"
         touch "$TSV"
     fi
+    # Helpers for this function alone (bash makes them global all the same)
     # A temp file next to its target (same filesystem, for mv), or anywhere when dry
     tmpfile() { if [ -n "$dry" ]; then mktemp -t wgt-import; else mktemp "$CONF/.$1.XXXXXX"; fi; }
     # new / updated / unchanged for $1 against $2; moves it into place unless dry
@@ -390,7 +393,7 @@ cmd_import_root() {
         ip=$(resolve "$host")
         if [ -z "$ip" ]; then
             # No DNS right now (the kill switch on, say): the copy from before stays
-            read -r iface _ ip <<< "$(tsv_get "$name")"
+            read -r iface kind ip <<< "$(tsv_get "$name")"
             if [ -n "$iface" ]; then
                 add_row "$name" "$iface" "$kind" "$ip"
                 row "$name" "$kind" "$iface" "kept: can't resolve ${host} (the copy from before stays)"
@@ -1106,7 +1109,7 @@ ready() {
 
 check_installed() {
     if [ -x "$INSTALLED" ] && install_stale; then
-        echo "Note: ${INSTALLED} differs from $0 — tunnel.sh update (or the next up/down/import) updates it" >&2
+        echo "Note: ${INSTALLED} differs from $0 — tunnel.sh update (or any command that asks the daemon) updates it" >&2
     fi
 }
 
@@ -1293,7 +1296,7 @@ cmd_rotate_warp() {
     active=$(st name)
     kind=$(st kind)
     if [ -n "$active" ] && { [ "$kind" = warped ] \
-        || [ "$(tr '[:upper:]' '[:lower:]' <<< "$active")" = "$(tr '[:upper:]' '[:lower:]' <<< "warp.$(basename "$(mac_dir)")")" ]; }; then
+        || [ "$(lower "$active")" = "$(lower "warp.$(basename "$(mac_dir)")")" ]; }; then
         echo "== Reconnect ${active}"
         ask up "$active"
     fi
@@ -1447,8 +1450,9 @@ status() {
 # is replaced, and ones not in the zip are removed. The zip is kept. Configs
 # wireguard-tools issued ("# wireguard-tools client:" line) are left alone:
 # they're wgt-ctl's to replace, and the app's export drops that line.
-# A config wireguard-tools issued, which extract keeps: it has the tools'
-# line. A warped.* one has it too (copied from its carrier), but it's the
+
+# tools_copy <conf>: one wireguard-tools issued, which extract keeps. A
+# warped.* one has the line too (copied from its carrier), but it's the
 # sweep's: it goes like the rest, and the next import writes it again.
 tools_copy() {
     is_warped "$(basename "$1")" && return 1
@@ -1464,6 +1468,8 @@ cmd_extract() {
         [ -n "$zip" ] || die "No zip in ${exports} — WireGuard app → Export Tunnels to Zip… into ${exports}"
     fi
     [ -f "$zip" ] || die "No zip ${zip}"
+    # It holds every key: 0600 like the rest of exports/ (the app saves it 0644)
+    case "$zip" in "$exports"/*) chmod 600 "$zip" ;; esac
     mkdir -p "$configs" && chmod 700 "$configs"
     tmp=$(mktemp -d "$configs/../.extract.XXXXXX") || die "mktemp failed"
     chmod 700 "$tmp"
@@ -1542,7 +1548,11 @@ cmd_import() {
 }
 
 usage() { echo "Usage: tunnel.sh -h | up [n|name] | down | pause [min] | resume | status | list | extract [zip] | import [dir] [-y] | extract-import [zip] | default [device] | update | install | uninstall | rotate-warp | diag [file] | log | breakglass"; }
-list_all() { echo "warped:"; load_tunnels warped; list warped; echo; echo "other:"; load_tunnels other; list other; }
+list_all() {
+    echo "warped:"; load_tunnels warped; list warped; echo
+    echo "other:"; load_tunnels other; list other; echo
+    echo "tunnel.sh up <n> picks from the warped list; up <name>, any tunnel"
+}
 
 case "${1:-}" in
     "")        check_installed; status; echo; usage ;;   # no command: status, and what else there is

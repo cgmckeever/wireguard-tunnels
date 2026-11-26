@@ -159,7 +159,7 @@ def test_both_bash_copies_know_a_warped_tunnel_as_wgtun_does(name):
     with open(os.path.join(store.SCRIPTS, "_lib.sh"), encoding="utf-8") as f:
         lib = re.search(r"^is_warped\(\) \{[^\n]*\}$", f.read(), re.M)
     assert lib, "is_warped is gone from _lib.sh"
-    for defs in (f"TUNNEL_PREFIX={store.WARPED}\n" + functions("is_warped"), lib.group(0)):
+    for defs in (f"TUNNEL_PREFIX={store.WARPED}\n" + functions("lower", "is_warped"), lib.group(0)):
         assert (bash(defs, 'is_warped "$1"', name).returncode == 0) == store.is_warped(name), defs
 
 
@@ -182,4 +182,4 @@ def test_extract_keeps_only_wireguard_tools_own(tmp_path, name, line, kept):
     path = tmp_path / name
     path.write_text(f"{line}\n[Interface]\n")
     call = f'TUNNEL_PREFIX={store.WARPED}; tools_copy "$1"'
-    assert (bash(functions("is_warped", "tools_copy"), call, str(path)).returncode == 0) == kept
+    assert (bash(functions("lower", "is_warped", "tools_copy"), call, str(path)).returncode == 0) == kept
