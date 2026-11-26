@@ -1273,7 +1273,7 @@ cmd_rotate_warp() {
     local warp old inst active kind
     [ "$(id -u)" -ne 0 ] || die "rotate-warp: run it as your user, not root"
     warp="$(mac_dir)/warp" || exit 1
-    inst="$(cd "$(dirname "$0")/.." && pwd)/install.sh"
+    inst="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)/install.sh"     # through a ~/bin link too
     [ -x "$inst" ] || die "rotate-warp: no install.sh next to $0 (run the repo's scripts/tunnel.sh)"
     old="$warp.old"
     [ -e "$old" ] && die "rotate-warp: ${old} is left from an earlier rotate. If WARP works, delete it; if not, put it back as ${warp}"
@@ -1520,7 +1520,7 @@ cmd_import() {
         dir=$(mac_dir) || exit 1
         src="$dir/config"
         # The repo's sweep, beside this script (the daemon's copy has none)
-        sweep="$(dirname "$0")/wgwarp-sweep.sh"
+        sweep="$(dirname "$(readlink -f "$0")")/wgwarp-sweep.sh"
         # Also with no carriers: it writes warp.<device>.conf from warp/ (new
         # keys after rotate-warp, a new .warp-endpoint, back after extract)
         if ls "$dir"/carriers/*.conf >/dev/null 2>&1 || [ -f "$dir/warp/wgcf-profile.conf" ]; then
