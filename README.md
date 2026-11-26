@@ -244,7 +244,7 @@ tunnel-puck's `pucks/`. This repo reads only `devices/` and each server's
         login      wgt-ctl's SSH login; nord.sh offers only servers with one
         carriers/  its exits (below)
         backups/   wireguard-tools' own (archives, private keys)
-    devices        a file: wireguard-tools' device numbers
+    device-list.json wireguard-tools' device numbers
   pucks/           tunnel-puck's own (each puck's settings)
 ```
 
