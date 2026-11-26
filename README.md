@@ -374,7 +374,7 @@ After `./install.sh`, with `<mac>` the device name it asked for:
    normal connection.
 
 Lost the network, or also using the WireGuard app? See
-[Troubleshooting](#troubleshooting).
+[Troubleshooting](TROUBLESHOOTING.md).
 
 ### tunnel.sh
 
@@ -395,7 +395,7 @@ Lost the network, or also using the WireGuard app? See
 | `rotate-warp` | New WARP keys: registers a new WARP account (through `install.sh`), imports it, and reconnects a warped tunnel or `warp.<mac>` that's up. The old account's files are deleted once that works (Cloudflare isn't told), or put back if registering fails. This Mac only: sing-box devices keep their own accounts |
 | `diag [file]` | Write one file with what's needed to debug: the daemon's status, configs, `wg show`, interfaces, routes, DNS and the last 300 log lines. Private and preshared keys are removed; server IPs and networks aren't, so read it before you share it. Default `~/wg-tunnels/diag/diag-<time>.txt` |
 | `log` | Follow the daemon's log |
-| `breakglass` | Lost the network? See [Troubleshooting](#troubleshooting) |
+| `breakglass` | Lost the network? See [Troubleshooting](TROUBLESHOOTING.md) |
 | `update` | Update the daemon from the repo's `tunnel.sh`, only if it differs (or its LaunchDaemon is missing), e.g. after a `git pull`. Restarts the daemon, so a tunnel that's up drops for a few seconds |
 | `install` | Install just the daemon, even when it's current |
 | `uninstall` | Take everything down and remove the daemon; configs are kept |
@@ -509,27 +509,7 @@ What it installs:
 
 ### Troubleshooting
 
-Start here when a tunnel or the network misbehaves.
-
-- **What's going on?** Run `tunnel.sh status`, then `tunnel.sh log` (the
-  daemon's log, `/var/log/wg-tunnels.log`). To send it to someone, use
-  `tunnel.sh diag`.
-- **Behind a hotel or café sign-in page?** The kill switch blocks it. Run
-  `tunnel.sh pause` (or the menu's Pause Protection), sign in, and the tunnel
-  comes back by itself.
-- **No network, even after `down`?** Run `tunnel.sh breakglass`. It trusts no
-  saved state: it stops WireGuard app tunnels, the daemon, `wg-quick` and
-  `wireguard-go`; removes every route of ours and any reject route; resets
-  tunnel DNS left on network services to DHCP; and power cycles Wi-Fi if it
-  has no address. It runs from the repo, so it works even if the daemon is
-  broken.
-- **A warped tunnel connects but nothing loads?** See
-  [Small carrier MTU](#small-carrier-mtu). If `import` skipped it, see
-  [Warped tunnels on this Mac](#warped-tunnels-on-this-mac).
-- **Also using the WireGuard app?** That's fine, with two rules. Turn off On
-  Demand for its tunnels: it reconnects behind `up` and breaks the tunnel, so
-  `up` refuses while it's on. And switch an app tunnel on only after `down`,
-  or the kill switch swallows its traffic. `up` stops app tunnels for you.
+In [TROUBLESHOOTING.md](TROUBLESHOOTING.md): where to start when a tunnel or the network misbehaves, `breakglass`, sign-in pages, and the WireGuard app.
 
 ### How it works
 
