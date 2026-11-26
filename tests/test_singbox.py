@@ -8,6 +8,7 @@ import os
 import pytest
 
 from wgtun import singbox, sweep
+from wgtun.conf import Conf
 from wgtun.store import Error
 
 from .conftest import client, fake_command
@@ -239,3 +240,9 @@ def test_a_tunnel_renamed_by_case_keeps_its_profile(phone, capsys):
     singbox.cmd_build("ph")
     assert "dengar.ph.json" in os.listdir(phone.path("devices/ph/sing-box"))
     assert "Dengar.ph.json" not in os.listdir(phone.path("devices/ph/sing-box"))
+
+
+def test_a_bare_allowed_ip_gets_its_prefix():
+    """wg reads a bare address as one host; sing-box's peer allowed_ips needs the prefix."""
+    c = Conf(client("bare", allowed="10.0.0.5, fd00::5, 10.9.8.0/24"), "x/config/bare.conf")
+    assert singbox.endpoint(c, "t", 1420)["peers"][0]["allowed_ips"] == ["10.0.0.5/32", "fd00::5/128", "10.9.8.0/24"]

@@ -80,6 +80,12 @@ class Unit:
 
 # --- sing-box JSON ---
 
+def prefixed(entry: str) -> str:
+    """An AllowedIPs entry with its prefix: wg takes a bare address as one
+    host, sing-box's peer allowed_ips refuses it."""
+    return entry if "/" in entry else entry + ("/128" if ":" in entry else "/32")
+
+
 def endpoint(c: Conf, tag: str, mtu: int, detour: str = "") -> dict:
     """A sing-box WireGuard endpoint, as the config says (keepalive included)."""
     host, port = c.endpoint()
@@ -88,7 +94,7 @@ def endpoint(c: Conf, tag: str, mtu: int, detour: str = "") -> dict:
     if detour:
         ep["detour"] = detour
     peer: dict = {"address": host, "port": port, "public_key": c.value("PublicKey"),
-                  "allowed_ips": c.items("AllowedIPs")}
+                  "allowed_ips": [prefixed(e) for e in c.items("AllowedIPs")]}
     if c.value("PresharedKey"):
         peer["pre_shared_key"] = c.value("PresharedKey")
     keepalive = c.keepalive()

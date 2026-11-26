@@ -163,6 +163,16 @@ def test_warp_alone_without_a_profile_is_an_orphan(tmp_store, capsys):
     assert s.written() == []
 
 
+def test_warp_alone_in_another_case_is_still_warp_alone(tmp_store):
+    """Matched without case, as the sweep claims it: its reason is WARP's, not a carrier's."""
+    tmp_store.device("ph")
+    run(tmp_store, "ph")
+    os.remove(tmp_store.path("devices/ph/warp/wgcf-profile.conf"))
+    os.rename(tmp_store.path("devices/ph/config/warp.ph.conf"), tmp_store.path("devices/ph/config/Warp.ph.conf"))
+    s = sweep.Sweep(tmp_store.path("devices/ph"), app_column=False)
+    assert [s.orphan_reason(r) for r in s.rows if r.state == "orphan"] == ["no warp/wgcf-profile.conf"]
+
+
 def test_a_non_utf8_config_is_replaced(tmp_store, capsys):
     """Not only carriers: the sweep compares what it writes with config/'s copy."""
     tmp_store.device("ph")

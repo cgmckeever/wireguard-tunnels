@@ -231,7 +231,7 @@ class Sweep:
 
     def orphan_reason(self, r: Row) -> str:
         """Why an orphan has nothing to come from."""
-        return "no warp/wgcf-profile.conf" if r.name == store.warp_alone(self.f.name) \
+        return "no warp/wgcf-profile.conf" if store.is_warp_alone(r.name, self.f.name) \
             else "no usable carrier in carriers/"
 
     def configs(self) -> List[Conf]:
