@@ -83,7 +83,7 @@ if [ "$kind" = server ]; then base="$SERVERS"; else base="$DEVICES"; fi
 names=()
 while read -r n; do
     if [ "$kind" = device ] || [ -f "$base/$n/login" ]; then names+=("$n"); fi
-done < <(folders "$base")
+done < <(folders "$base" | sort -f)    # name order, case ignored, as wgt-ctl list
 if [ ${#names[@]} -eq 0 ]; then
     [ "$kind" = server ] || die "no devices in $base"
     die "no servers that wireguard-tools lists (wgt-ctl init adds one)"
