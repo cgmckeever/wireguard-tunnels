@@ -225,8 +225,8 @@ README writes `~/wg-tunnels` either way. The
 and Export Diagnostics only work with the default location.
 
 It holds `devices/`, one folder per device that runs tunnels, and, only if you
-use wireguard-tools, that repo's `fleet/` (its servers, each with its exits)
-and tunnel-puck's `pucks/`. This repo reads only `devices/` and each server's
+use wireguard-tools, its `fleet/` (each server's login, exits and backups) and
+tunnel-puck's `pucks/`. This repo reads only `devices/` and each server's
 `login` and `carriers/`.
 
 ```
