@@ -11,8 +11,10 @@ the behavior; this file says how to change it without tangling it again.
   - A tunnel's settings, its keepalive included, are decided once, where
     `config/` is written: the sweep, `nord.sh`, wireguard-tools. Consumers
     pass them through.
-  - The one exception is a sing-box group. It drops keepalives because it
-    runs every tunnel at once.
+  - Two exceptions. A sing-box group drops keepalives because it runs every
+    tunnel at once. And `tunnel.sh` gives WARP 25 when its config has none
+    (the daemon's `warp.conf`, and a WARP-alone config imported from a
+    `dir`).
 - **Ownership goes by name, without case** (the Mac's file system ignores
   it: `Warped.x` is the file the sweep writes as `warped.x`). One rule:
   `store.is_warped`, `is_warp_alone` and `sweep_owned`, with copies in

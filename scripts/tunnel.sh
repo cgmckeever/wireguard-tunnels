@@ -30,7 +30,7 @@
 #   tunnel.sh uninstall     Take everything down, remove both (configs are kept)
 #   tunnel.sh rotate-warp   New Cloudflare WARP keys: registers a new account
 #                           (install.sh), imports it, and reconnects a warped
-#                           tunnel that's up. The old account's files are
+#                           tunnel or warp.<mac> that's up. The old account's files are
 #                           removed once that works (Cloudflare isn't told),
 #                           or put back if registering fails.
 #   tunnel.sh pause [min]   Kill switch off and tunnel down for min minutes
