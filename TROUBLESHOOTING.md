@@ -24,8 +24,11 @@ profiles are [at the end](#sing-box-profiles).
   [Warped tunnels on this Mac](README.md#warped-tunnels-on-this-mac).
 - **Also using the WireGuard app?** That's fine, with two rules. Turn off On
   Demand for its tunnels: it reconnects behind `up` and breaks the tunnel, so
-  `up` refuses while it's on. And switch an app tunnel on only after `down`,
-  or the kill switch swallows its traffic. `up` stops app tunnels for you.
+  `up` refuses while it's on. And turn an app tunnel on only after `down`, or
+  the kill switch swallows its traffic (`up` turns app tunnels off for you).
+- **`nord.sh server` lists no servers?** It offers only the servers
+  wireguard-tools lists (a `fleet/servers/<server>/login` file); `wgt-ctl init`
+  adds one.
 
 ## Sing-box profiles
 

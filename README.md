@@ -8,8 +8,8 @@
 - [Quick start](#quick-start): [install.sh](#installsh), [conventions](#conventions)
 - [Your folders](#your-folders): [devices](#devices), [servers](#servers), [keys](#keys)
 - [Warped tunnels](#warped-tunnels) and the sweep: [extras](#extras), [small carrier MTU](#small-carrier-mtu), [WARP endpoint](#warp-endpoint)
-- [Local Mac Tunnels](#local-mac-tunnels): [Mac quick start](#mac-quick-start), [`tunnel.sh`](#tunnelsh), [warped tunnels on this Mac](#warped-tunnels-on-this-mac), [WARP alone behind a router](#warp-alone-behind-a-router), [the menu bar lock](#menu-bar-optional), [how it works](#how-it-works), [uninstall](#uninstall)
-- [Sing-Box Device Tunnels](#sing-box-device-tunnels): [sing-box quick start](#sing-box-quick-start), [which profile](#which-profile-to-import), [getting it to the device](#getting-a-profile-to-the-device), [updating](#updating-a-device), [`singbox.sh`](#singboxsh), [removing a device](#removing-a-device)
+- [Local Mac Tunnels](#local-mac-tunnels): [Mac quick start](#mac-quick-start), [`tunnel.sh`](#tunnelsh) ([tunnel kinds](#tunnel-kinds)), [warped tunnels on this Mac](#warped-tunnels-on-this-mac), [WARP alone behind a router](#warp-alone-behind-a-router), [the menu bar lock](#menu-bar-optional), [how it works](#how-it-works), [uninstall](#uninstall)
+- [Sing-Box Device Tunnels](#sing-box-device-tunnels): [sing-box quick start](#sing-box-quick-start), [which profile](#which-profile-to-import), [getting it to the device](#getting-a-profile-to-the-device), [updating](#updating-a-device), [what build accepts](#what-build-accepts-and-writes), [`singbox.sh`](#singboxsh), [sing-box on this Mac](#sing-box-on-this-mac), [removing a device](#removing-a-device)
 - [QR codes](#a-tunnel-as-a-qr-code), [NordVPN](#nordvpn), [the folder shared with wireguard-tools](#shared-folder), [checking the store](#checking-the-store)
 - [Troubleshooting](TROUBLESHOOTING.md)
 - [Developing](#developing)
@@ -217,8 +217,9 @@ Everything lives in `~/wg-tunnels`, and its folders are all `0700`: they
 hold private keys. Nothing here sends them anywhere; only the sing-box
 profiles you send yourself leave the Mac.
 
-To keep it elsewhere, set `$WG_TUNNELS` in your shell profile before the
-first `install.sh`; every script here (and wireguard-tools) reads it. This
+To keep it elsewhere, set `$WG_TUNNELS` to an absolute path (not `~/…`) in
+your shell profile before the first `install.sh`; every script here, and
+wireguard-tools, reads it. This
 README writes `~/wg-tunnels` either way. The
 [menu bar lock](#menu-bar-optional) doesn't read it, so its Rotate WARP Keys
 and Export Diagnostics only work with the default location.
@@ -240,10 +241,10 @@ and tunnel-puck's `pucks/`. This repo reads only `devices/` and each server's
   fleet/           only with wireguard-tools
     servers/
       dengar/      one of its servers
-        login      how wgt-ctl reaches it: a server with one is listed
+        login      wgt-ctl's SSH login; nord.sh offers only servers with one
         carriers/  its exits (below)
         backups/   wireguard-tools' own (archives, private keys)
-    devices        wireguard-tools' own (device numbers)
+    devices        a file: wireguard-tools' device numbers
   pucks/           tunnel-puck's own (each puck's settings)
 ```
 
@@ -273,21 +274,8 @@ already there alone.
 
 ### Servers
 
-Only with wireguard-tools; skip this otherwise. It makes a folder in
-`fleet/servers/` for each server it manages, with a `login` file (the servers
-offered here are the ones with one) and a `carriers/` folder for that server's
-exits (wireguard-tools calls them *jumps*), one `.conf` each, and
-reads the exits from there. They're never tunnels on your devices.
-
-You can set them up here, by hand or with [`nord.sh`](#nordvpn). By hand,
-save a config from your VPN provider and give it a line naming its jump:
-
-```ini
-# jump: <code> <label>
-```
-
-`nord.sh` writes that line for you. Then `wgt-ctl <server> jump-add` adds the
-exit to the server under that code.
+Only with wireguard-tools: see [Servers](#servers-wireguard-tools) under the
+folder shared with it.
 
 ### Keys
 
@@ -316,8 +304,8 @@ becomes `config/warped.proton.chicago.iphone.conf`, with `AllowedIPs` set to the
 (plus [extras](#extras)), the `DNS` line removed, and
 `PersistentKeepalive = 25`, so the carrier carries WARP and nothing else. The
 `warped.` prefix is what marks a tunnel as warped. The device's name (its
-folder's) always goes last. If the carrier's name already contains the
-device as a word of its own (between `.`, `_` or `-`), it's moved to the end:
+folder's) always goes last, and is moved there if the carrier's name already
+has it as a separate word (between `.`, `_` or `-`):
 `carriers/proton.chicago_iphone-US-IL-802.conf` becomes
 `warped.proton.chicago-US-IL-802.iphone`.
 
@@ -328,11 +316,11 @@ this Mac `tunnel.sh import` takes it as a full tunnel (in the menu under
 OTHER), and it shares the WARP key safely because the daemon runs one tunnel
 at a time. It also works in the WireGuard app, and `build` makes sing-box's
 `warp.<device>` from it, so WARP is the same everywhere. It has
-`PersistentKeepalive = 25`, as every one-tunnel config should. `singbox.sh new` runs the sweep
-too, so a new device has its `warp.<device>.conf` right away; on this Mac,
-`import` sweeps again every time, so it picks up new keys after `rotate-warp`
-and a new [endpoint](#warp-endpoint) (after `install.sh` has rewritten this
-Mac's WARP config).
+`PersistentKeepalive = 25`, as every one-tunnel config should.
+`singbox.sh new` runs the sweep too, so a new device has `warp.<device>.conf`
+at once. On this Mac every `import` sweeps again, picking up new keys after
+`rotate-warp`, or a new [endpoint](#warp-endpoint) once `install.sh` has
+rewritten the WARP config.
 
 **Edit the carrier, not the warped file.** Every sweep writes the warped file
 again from its carrier (only when it changes). `x.conf`, `warped.x.conf` and
@@ -673,11 +661,11 @@ case), the server it goes to: `<server>.list.<device>.json`.
 | `proton.list.iphone.json` | `proton.chicago`, `proton.toronto` (provider configs used directly) |
 | `warped.list.iphone.json` | Every `warped.*` tunnel, whatever carries it, and `warp.iphone` |
 
-A group is only written when it has two or more tunnels, even if it ends up
-holding the same tunnels as the composite. So name every config
-`<server>.<name>.conf`: `proton.chicago.conf`, not `chicago.conf`
-(wireguard-tools' names already are). Carriers follow the same rule for
-readable names, though their warped tunnels all group under `warped`:
+A group is written only when it has two or more tunnels, even if it then
+matches the composite. So name configs `<server>.<name>.conf`
+(`proton.chicago.conf`, not `chicago.conf`); wireguard-tools' already are.
+Name carriers the same way for readable names, though their warped tunnels
+all group under `warped`:
 `carriers/proton.chicago.conf` gives `warped.proton.chicago.iphone`.
 
 Every device with a `warp/` account also gets `warp.<device>`
@@ -863,7 +851,7 @@ nord.sh server dengar us "new york"       # fleet/servers/dengar/carriers/nord.u
 
 - **One file per device or server and place** (a country, or a city in it). Running it
   again regenerates that file, keeping its Nord server while Nord still
-  recommends it. A device can have both a carrier and a config for one place.
+  recommends it and no other Nord file uses it. A device can have both a carrier and a config for one place.
   Only files with a `# source: nord` line are regenerated; another file of the
   same name is left alone. `tunnel.sh extract` removes Nord configs from
   `config/` (they aren't in the WireGuard app's zip): run `nord.sh` again.
@@ -885,7 +873,7 @@ nord.sh server dengar us "new york"       # fleet/servers/dengar/carriers/nord.u
 
 Only with [wireguard-tools](https://github.com/cgmckeever/wireguard-tools).
 It shares `~/wg-tunnels` with this repo: it reads each server's exits from
-`fleet/servers/<server>/carriers/` ([Servers](#servers)) and puts the client configs
+`fleet/servers/<server>/carriers/` ([below](#servers-wireguard-tools)) and puts the client configs
 it issues in `devices/<device>/config/` ([Devices](#devices)). Whichever runs
 first creates `~/wg-tunnels`, and both read its location from `$WG_TUNNELS`
 ([Your folders](#your-folders)).
@@ -894,9 +882,9 @@ first creates `~/wg-tunnels`, and both read its location from `$WG_TUNNELS`
 `# wireguard-tools client: <config> on <server>`. They're wgt-ctl's to
 replace: the live copy is on the server, and `wgt-ctl sync` puts it back.
 Nothing here changes, renames or deletes one. The sweep writes only
-`warped.*` and `warp.<device>.conf`, names wireguard-tools never gives a file
-(it names its own `<server>.<config>.conf` and leaves both alone, in any case), so
-the two can't write over each other. A warped tunnel made from a
+`warped.*` and `warp.<device>.conf`. wireguard-tools never uses those names,
+in any case (it names its files `<server>.<config>.conf`), so neither can
+overwrite the other. A warped tunnel made from a
 wireguard-tools carrier keeps its `# wireguard-tools client:` line; that's
 fine, both sides go by the name. `tunnel.sh extract` goes by that line
 instead: it keeps a config that has it (the WireGuard app's export drops
@@ -906,11 +894,24 @@ it), except a `warped.*` one, and replaces the rest from the zip.
 each write a tunnel with `PersistentKeepalive = 25`, and the WireGuard app,
 `tunnel.sh` and sing-box run it as written. Two exceptions: a sing-box group
 drops keepalives (it runs every tunnel at once), and `tunnel.sh` gives WARP
-one when its config has none. `CLAUDE.md` has the full contract.
+one when its config has none. [CLAUDE.md](CLAUDE.md) has the full contract.
 
 **Backups.** When wgt-ctl replaces or removes a config, the old one becomes
 `<name>.conf.<time>.bak`. Everything here reads only `*.conf`, so backups are
 never listed, imported or built. Delete them when you no longer need them.
+
+### Servers (wireguard-tools)
+
+Each server wireguard-tools manages has a folder in `fleet/servers/`. A
+`login` file marks it as one of wgt-ctl's servers, and only those are offered
+here. Its `carriers/` holds that server's exits (wireguard-tools calls them
+*jumps*), one `.conf` each. They run on the server, not on your devices.
+
+You can add exits by hand or with [`nord.sh`](#nordvpn): save a config from
+your VPN provider in `fleet/servers/<server>/carriers/`, then run `wgt-ctl
+<server> jump-add`. The first time, it asks what the file is and writes a
+`# jump: <code> <label>` line into it; `nord.sh` writes that line for you. See
+wireguard-tools' [Adding jumps from your machine](https://github.com/cgmckeever/wireguard-tools#adding-jumps-from-your-machine).
 
 ## Checking the store
 
@@ -948,5 +949,5 @@ bash: it's the root daemon, installed as one file.
   before each commit, and GitHub Actions runs it on every push (on macOS).
 - `tests/golden/` pins every file, mode and line the old shell scripts wrote:
   change it only when what the scripts write or say is meant to change.
-- `CLAUDE.md` has the layout, the contract between the parts, and the rules
+- [CLAUDE.md](CLAUDE.md) has the layout, the contract between the parts, and the rules
   for changing them without tangling them.
