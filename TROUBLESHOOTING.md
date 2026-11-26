@@ -20,7 +20,8 @@ profiles are [at the end](#sing-box-profiles).
 - **A warped tunnel connects but nothing loads?** See
   [Small carrier MTU](README.md#small-carrier-mtu), or for `warp.<mac>` behind a
   travel router, [WARP alone behind a router](README.md#warp-alone-behind-a-router).
-  If `import` skipped it, see [Warped tunnels on this Mac](README.md#warped-tunnels-on-this-mac).
+  If `import` skipped it (or any tunnel), its line says why; see
+  [Warped tunnels on this Mac](README.md#warped-tunnels-on-this-mac).
 - **Also using the WireGuard app?** That's fine, with two rules. Turn off On
   Demand for its tunnels: it reconnects behind `up` and breaks the tunnel, so
   `up` refuses while it's on. And switch an app tunnel on only after `down`,

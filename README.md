@@ -8,7 +8,7 @@
 - [Quick start](#quick-start): [install.sh](#installsh), [conventions](#conventions)
 - [Your folders](#your-folders): [devices](#devices), [servers](#servers), [keys](#keys)
 - [Warped tunnels](#warped-tunnels) and the sweep: [extras](#extras), [small carrier MTU](#small-carrier-mtu), [WARP endpoint](#warp-endpoint)
-- [Local Mac Tunnels](#local-mac-tunnels): [Mac quick start](#mac-quick-start), [`tunnel.sh`](#tunnelsh), [the menu bar lock](#menu-bar-optional), [how it works](#how-it-works), [uninstall](#uninstall)
+- [Local Mac Tunnels](#local-mac-tunnels): [Mac quick start](#mac-quick-start), [`tunnel.sh`](#tunnelsh), [warped tunnels on this Mac](#warped-tunnels-on-this-mac), [WARP alone behind a router](#warp-alone-behind-a-router), [the menu bar lock](#menu-bar-optional), [how it works](#how-it-works), [uninstall](#uninstall)
 - [Sing-Box Device Tunnels](#sing-box-device-tunnels): [sing-box quick start](#sing-box-quick-start), [which profile](#which-profile-to-import), [getting it to the device](#getting-a-profile-to-the-device), [updating](#updating-a-device), [`singbox.sh`](#singboxsh), [removing a device](#removing-a-device)
 - [QR codes](#a-tunnel-as-a-qr-code), [NordVPN](#nordvpn), [the folder shared with wireguard-tools](#shared-folder), [checking the store](#checking-the-store)
 - [Troubleshooting](TROUBLESHOOTING.md)
@@ -70,7 +70,7 @@ devices' configs, and this repo can set up its servers' exits
   The *sweep* writes it from the carrier ([Warped tunnels](#warped-tunnels)).
 - **Plain tunnel:** any other WireGuard config, used as it is.
 - **WARP alone:** `warp.<device>`, the device's own WARP account with no
-  carrier.
+  carrier. It counts as a plain tunnel (`n` at `tunnel.sh up`).
 - **Device:** anything that runs tunnels (this Mac, a phone, an Apple TV). Each
   has its own folder, keys and WARP account ([Devices](#devices)).
 - **Kill switch:** on this Mac, routes that block all traffic outside the
@@ -162,7 +162,7 @@ choice 2.
 | Step | `install.sh` | `--sing-box` |
 |------|--------------|--------------|
 | Homebrew packages | `wireguard-tools` (`wg`, `wg-quick`, `wireguard-go`), `wgcf` (WARP accounts), `jq` (`nord.sh`), `qrencode` ([qr.sh](#a-tunnel-as-a-qr-code)) | `wgcf`, `jq`, `qrencode` |
-| Folders | This Mac's device, `~/wg-tunnels/devices/<mac>/`; writes `<mac>` to `.default` | A first device, `~/wg-tunnels/devices/<device>/` (`singbox.sh new`) |
+| Folders | This Mac's device, `~/wg-tunnels/devices/<mac>/`; writes `<mac>` to `.default` | A first device, if you name one: `~/wg-tunnels/devices/<device>/` (`singbox.sh new`) |
 | WARP | Registers a free WARP account for this Mac (`wgcf register`, which accepts Cloudflare's terms of service) and writes `$(brew --prefix)/etc/wireguard/warp.conf` from it | The first device's own account |
 | Daemon | Installs `/usr/local/sbin/wg-tunnels` (a copy of `tunnel.sh`) and the `com.local.wg-tunnels` LaunchDaemon, using `sudo`, when the repo copy differs or the LaunchDaemon is missing | none |
 
@@ -196,7 +196,8 @@ choice 2.
   ```
 
   From here on this README writes just the script name (`tunnel.sh`,
-  `singbox.sh`, `nord.sh`, `qr.sh`, `wgwarp-sweep.sh`, `check.sh`).
+  `singbox.sh`, `nord.sh`, `qr.sh`, `wgwarp-sweep.sh`, `check.sh`): with the
+  aliases, type `tunnel` for `tunnel.sh`, and so on.
 - **Safe to re-run:** `install.sh`, `import`, `build`, the sweep and
   `nord.sh` change only what's missing or out of date, and say what they
   changed.
@@ -322,7 +323,8 @@ at a time. It also works in the WireGuard app, and `build` makes sing-box's
 `PersistentKeepalive = 25`, as every one-tunnel config should. `singbox.sh new` runs the sweep
 too, so a new device has its `warp.<device>.conf` right away; on this Mac,
 `import` sweeps again every time, so it picks up new keys after `rotate-warp`
-and a new [endpoint](#warp-endpoint).
+and a new [endpoint](#warp-endpoint) (after `install.sh` has rewritten this
+Mac's WARP config).
 
 **Edit the carrier, not the warped file.** Every sweep writes the warped file
 again from its carrier (only when it changes). `x.conf`, `warped.x.conf` and
@@ -423,7 +425,7 @@ Lost the network, or also using the WireGuard app? See
 | `resume` | End a pause now |
 | `status` (default) | Tunnels, what's up, handshakes, the kill switch, the exit IP |
 | `list` | Number the warped and other tunnels |
-| `import [dir] [-y]` | Run the [sweep](#warped-tunnels) (`<mac>/carriers/` into warped tunnels in `config/`, and `warp.<mac>.conf`), then install every `.conf` in `<mac>/config/` for the daemon, and sort each into its [kind](#tunnel-kinds). Given a `dir`, installs the `.conf` files there instead, with no sweep. Tunnels no longer there are removed, unless up right now. Shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y`, or no terminal, skips the question |
+| `import [dir] [-y]` | Run the [sweep](#warped-tunnels) (`<mac>/carriers/` into warped tunnels in `config/`, and `warp.<mac>.conf`), then install every `.conf` in `<mac>/config/` for the daemon, and sort each into its [kind](#tunnel-kinds). Given a `dir`, installs the `.conf` files there instead, with no sweep. Tunnels no longer there are removed, unless up or wanted (paused, or a failed `up`). Shows what it would do (new, updated, unchanged, removed, and the WARP config) and asks; `-y`, or no terminal, skips the question |
 | `extract [zip]` | For tunnels kept in the WireGuard app: replace `<mac>/config/` with the `.conf` files in the newest zip from its *Export Tunnels to Zip…* in `<mac>/exports/` (or the one given). Configs not in the zip are removed, `nord.sh`'s included; only wireguard-tools' are kept ([Shared folder](#shared-folder)). Warped ones and `warp.<mac>.conf` come back on the next `import`. The zip is kept |
 | `extract-import [zip]` | `extract`, then `import` |
 | `default [device]` | Show or change this Mac's device, saved in `~/wg-tunnels/devices/.default`. `extract`, `import` and `rotate-warp` use it. Changing it doesn't touch the daemon; run `import` after |
@@ -466,6 +468,11 @@ updates `config/` and prints the report, but installs nothing.
 endpoint in `AllowedIPs`, nothing wider than a /8 (/16 for IPv6), and no
 `DNS` line. One that fails (usually edited by hand) is skipped, not fixed. An
 orphan still looks swept, so it's imported until you delete it.
+
+`import` also skips, and says why, a config whose file name has a space or
+another character outside `A-Z a-z 0-9 . _ = + -` (rename it), and a full or
+warped tunnel whose `Endpoint` is an IPv6 address (the daemon routes servers
+over IPv4; a hostname is looked up as IPv4).
 
 The daemon starts WARP inside the carrier at the right MTU
 ([Small carrier MTU](#small-carrier-mtu)) and logs when it lowers it.
