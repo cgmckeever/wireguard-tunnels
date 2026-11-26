@@ -213,3 +213,25 @@ def test_the_python_scripts_run_their_own_wgtun(tmp_path):
         out = subprocess.run([os.path.join(REPO, "scripts", cmd[0]), *cmd[1:]], cwd=tmp_path,
                              capture_output=True, text=True)
         assert out.returncode == 0 and "wrong wgtun" not in out.stdout + out.stderr, (cmd, out)
+
+
+@pytest.mark.skipif(not shutil.which("jq"), reason="nord.sh needs jq before it picks")
+def test_nord_offers_only_the_servers_wireguard_tools_lists(tmp_path):
+    """A server folder counts once wireguard-tools lists it (its login file), as
+    wgt-ctl's own list does; a removed server's backups don't bring it back. Both
+    runs stop before Nord's API."""
+    servers = tmp_path / "fleet" / "servers"
+    (servers / "listed").mkdir(parents=True)
+    (servers / "listed" / "login").write_text("root@h\n")
+    (servers / "removed" / "backups").mkdir(parents=True)
+
+    def nord(*args):
+        env = dict(os.environ, WG_TUNNELS=str(tmp_path))
+        return subprocess.run(["bash", os.path.join(REPO, "scripts", "nord.sh"), *args], env=env,
+                              stdin=subprocess.DEVNULL, capture_output=True, text=True)
+
+    r = nord("server", "removed", "us")
+    assert r.returncode != 0 and "no server 'removed'" in r.stderr
+    (servers / "listed" / "login").unlink()
+    r = nord("server", "listed", "us")
+    assert r.returncode != 0 and "wireguard-tools lists" in r.stderr

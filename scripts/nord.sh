@@ -44,6 +44,7 @@ umask 077
 SELF=$(readlink -f "$0"); . "$(dirname "$SELF")/_lib.sh"
 
 TOKEN_FILE="$WG_TUNNELS/.nord-token"
+SERVERS="$WG_TUNNELS/fleet/servers"         # wireguard-tools' servers (its wgt/ctl/home.py)
 API=https://api.nordvpn.com/v1
 PORT=51820
 ADDRESS=10.5.0.2/32                         # NordLynx gives every client this
@@ -78,12 +79,15 @@ shopt -s nullglob
 # 1. The holder: a device or a server
 kind=$(pick "device or server" "$1" device server) || exit 1
 # A server is one wireguard-tools lists: its folder has a login file.
-if [ "$kind" = server ]; then base="$WG_TUNNELS/fleet/servers"; else base="$DEVICES"; fi
+if [ "$kind" = server ]; then base="$SERVERS"; else base="$DEVICES"; fi
 names=()
 while read -r n; do
     if [ "$kind" = device ] || [ -f "$base/$n/login" ]; then names+=("$n"); fi
 done < <(folders "$base")
-[ ${#names[@]} -gt 0 ] || die "no ${kind}s in $base"
+if [ ${#names[@]} -eq 0 ]; then
+    [ "$kind" = server ] || die "no devices in $base"
+    die "no servers that wireguard-tools lists (wgt-ctl init adds one)"
+fi
 [ -n "$2" ] || [ ! -t 0 ] || echo "$([ "$kind" = server ] && echo Servers || echo Devices):" >&2
 holder=$(pick "$kind" "$2" "${names[@]}") || exit 1
 
@@ -152,7 +156,7 @@ fi
 # by that line, not by rebuilding the sweep's name for it)
 source_line="# source: nord $cc${want_city:+ $slug}"
 taken=" "
-for f in "$DEVICES"/*/{carriers,config}/*.conf "$WG_TUNNELS"/fleet/servers/*/carriers/*.conf; do
+for f in "$DEVICES"/*/{carriers,config}/*.conf "$SERVERS"/*/carriers/*.conf; do
     [ "$f" = "$out" ] && continue
     [ "$kind/$role" = device/carrier ] && [ "${f%/*}" = "$base/$holder/config" ] && is_warped "${f##*/}" \
         && grep -qxF "$source_line" "$f" && continue
