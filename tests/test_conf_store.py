@@ -139,3 +139,9 @@ def test_write_private_leaves_nothing_when_it_fails(tmp_path, monkeypatch):
     with pytest.raises(OSError):
         store.write_private(str(tmp_path / "a.conf"), "x")
     assert os.listdir(tmp_path) == []
+
+
+def test_an_indented_section_header_counts():
+    """As wg-quick and tunnel.sh read it."""
+    text = "  [Interface]\nPrivateKey = a\nAddress = 10.0.0.2/32\n  [Peer]\nPublicKey = b\nEndpoint = h:1\n"
+    assert Conf(text).problem() == ""

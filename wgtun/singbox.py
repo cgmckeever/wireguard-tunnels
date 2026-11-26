@@ -205,7 +205,7 @@ def plain(c: Conf, mtu: int, say: Say) -> Unit:
     """A tunnel used as it stands. A profile sends everything to the tunnel in
     use, so a split config (a home LAN only, say) leaves the device with
     nothing past its own networks, not even DNS."""
-    if "0.0.0.0/0" not in c.items("AllowedIPs"):
+    if not c.is_full():
         say(f"warning: {c.name} is a split tunnel (no 0.0.0.0/0): in sing-box it takes all traffic, "
             "and only its own networks work", True)
     if not c.keepalive():

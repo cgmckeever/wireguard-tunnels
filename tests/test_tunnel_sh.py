@@ -183,3 +183,14 @@ def test_extract_keeps_only_wireguard_tools_own(tmp_path, name, line, kept):
     path.write_text(f"{line}\n[Interface]\n")
     call = f'TUNNEL_PREFIX={store.WARPED}; tools_copy "$1"'
     assert (bash(functions("lower", "is_warped", "tools_copy"), call, str(path)).returncode == 0) == kept
+
+
+@pytest.mark.parametrize("allowed", ["0.0.0.0/0, ::/0", "0.0.0.0/1, 128.0.0.0/1", "10.0.0.0/0",
+                                     "0.0.0.0/1", "10.9.8.0/24", "::/0"])
+def test_kind_of_full_as_wgtun_judges_it(tmp_path, allowed):
+    """tunnel.sh's full (a kill switch) is what singbox.sh doesn't warn about as split."""
+    path = tmp_path / "t.conf"
+    path.write_text(f"[Interface]\n[Peer]\nAllowedIPs = {allowed}\nEndpoint = h:1\n")
+    defs = f"TUNNEL_PREFIX={store.WARPED}\n" + functions("lower", "is_warped", "conf_vals", "list_of", "kind_of")
+    sh = bash(defs, 'kind_of t "$1"', str(path)).stdout.strip()
+    assert (sh == "full") == Conf.read(str(path)).is_full()

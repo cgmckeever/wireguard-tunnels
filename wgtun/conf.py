@@ -51,6 +51,11 @@ class Conf:
     def mtu(self, default: int) -> int:
         return self.number("MTU", default)
 
+    def is_full(self) -> bool:
+        """Takes all of IPv4: a /0, or its two /1 halves (as tunnel.sh's kind_of)."""
+        ips = self.items("AllowedIPs")
+        return any(re.fullmatch(r"[0-9.]+/0", e) for e in ips) or {"0.0.0.0/1", "128.0.0.0/1"} <= set(ips)
+
     def endpoint(self) -> Tuple[str, int]:
         """(host, port), brackets taken off an IPv6 host."""
         host, _, port = self.value("Endpoint").rpartition(":")
@@ -58,9 +63,9 @@ class Conf:
 
     def problem(self) -> str:
         """Why this isn't a usable one-peer client config, or "" when it is."""
-        if not any(re.match(r"\[Interface\]", ln, re.I) for ln in self.lines):
+        if not any(re.match(r"\s*\[Interface\]", ln, re.I) for ln in self.lines):
             return "no [Interface]"
-        peers = sum(1 for ln in self.lines if re.match(r"\[Peer\]", ln, re.I))
+        peers = sum(1 for ln in self.lines if re.match(r"\s*\[Peer\]", ln, re.I))
         if peers != 1:
             return f"{peers} [Peer] sections, needs one"
         for key in ("PrivateKey", "PublicKey"):

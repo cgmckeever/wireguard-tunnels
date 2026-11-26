@@ -330,7 +330,7 @@ resolve() {
 # changes nothing; changes prints only what changed (the dry run before it
 # showed the rest)
 cmd_import_root() {
-    local src="$1" dry="${2:-}" changes="${3:-}" f name kind host ip iface out tmp state n wep active want wanted why rows="" seen="" w same=0
+    local src="$1" dry="${2:-}" changes="${3:-}" f name kind host ip iface out tmp state n wep active want wanted why okind rows="" seen="" w same=0
     need_root import
     [ -d "$src" ] || die "No folder ${src}"
     if [ -z "$dry" ]; then
@@ -393,10 +393,10 @@ cmd_import_root() {
         ip=$(resolve "$host")
         if [ -z "$ip" ]; then
             # No DNS right now (the kill switch on, say): the copy from before stays
-            read -r iface kind ip <<< "$(tsv_get "$name")"
+            read -r iface okind ip <<< "$(tsv_get "$name")"
             if [ -n "$iface" ]; then
-                add_row "$name" "$iface" "$kind" "$ip"
-                row "$name" "$kind" "$iface" "kept: can't resolve ${host} (the copy from before stays)"
+                add_row "$name" "$iface" "$okind" "$ip"
+                row "$name" "$okind" "$iface" "kept: can't resolve ${host} (the copy from before stays)"
             else
                 row "$name" "$kind" - "skipped: can't resolve ${host}"
             fi
@@ -1469,8 +1469,8 @@ cmd_extract() {
         [ -n "$zip" ] || die "No zip in ${exports} — WireGuard app → Export Tunnels to Zip… into ${exports}"
     fi
     [ -f "$zip" ] || die "No zip ${zip}"
-    # It holds every key: 0600 like the rest of exports/ (the app saves it 0644)
-    case "$zip" in "$exports"/*) chmod 600 "$zip" ;; esac
+    # They hold every key: 0600 like the rest of exports/ (the app saves them 0644)
+    chmod 600 "$exports"/*.zip 2>/dev/null
     mkdir -p "$configs" && chmod 700 "$configs"
     tmp=$(mktemp -d "$configs/../.extract.XXXXXX") || die "mktemp failed"
     chmod 700 "$tmp"
