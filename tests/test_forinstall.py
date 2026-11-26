@@ -65,7 +65,7 @@ def test_daemon_warp_refuses_what_the_sweep_would_skip(tmp_store, capsys, tmp_pa
 @pytest.mark.parametrize("args", [[], ["nope", "x"], ["warp-endpoint"], ["daemon-warp", "a"], ["folders"]])
 def test_usage(args, capsys):
     assert forinstall.main(args) == 1
-    assert capsys.readouterr().err.startswith("install.sh: usage: python3 -m wgtun.forinstall ")
+    assert capsys.readouterr().err.startswith("install.sh: usage: scripts/_python.sh forinstall ")
 
 
 def test_warp_account_left_from_an_earlier_one(tmp_store, capsys, fake_wgcf):

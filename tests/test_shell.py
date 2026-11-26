@@ -202,3 +202,14 @@ def test_parses_in_macos_bash(script):
 
 def test_sources_found():
     assert set(SOURCED) == {"install.sh", "scripts/nord.sh", "scripts/qr.sh"}
+
+
+def test_the_python_scripts_run_their_own_wgtun(tmp_path):
+    """Not a wgtun/ in the current folder (another checkout, say), which python3 -m would take first."""
+    (tmp_path / "wgtun").mkdir()
+    for name in ("__init__.py", "check.py", "forinstall.py"):
+        (tmp_path / "wgtun" / name).write_text('raise SystemExit("the wrong wgtun")\n')
+    for cmd in (["check.sh", "-h"], ["_python.sh", "forinstall", "device-name", "ok"]):
+        out = subprocess.run([os.path.join(REPO, "scripts", cmd[0]), *cmd[1:]], cwd=tmp_path,
+                             capture_output=True, text=True)
+        assert out.returncode == 0 and "wrong wgtun" not in out.stdout + out.stderr, (cmd, out)

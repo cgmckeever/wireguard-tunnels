@@ -1,11 +1,11 @@
 """What install.sh asks of wgtun, so it reads and writes the store as the
 sweep and singbox.sh do. Each prints install.sh's "ok"/"changed" lines.
 
-  python3 -m wgtun.forinstall device-name <name>              nothing, or why a device can't be called that
-  python3 -m wgtun.forinstall warp-endpoint <device dir>       the WARP endpoint (or why .warp-endpoint is wrong)
-  python3 -m wgtun.forinstall folders <dir>...                 each a 0700 folder
-  python3 -m wgtun.forinstall warp-account <device dir>        the device's WARP account and profile in warp/
-  python3 -m wgtun.forinstall daemon-warp <device dir> <file>  this Mac's warp.conf for the daemon, from warp/
+  scripts/_python.sh forinstall device-name <name>              nothing, or why a device can't be called that
+  scripts/_python.sh forinstall warp-endpoint <device dir>       the WARP endpoint (or why .warp-endpoint is wrong)
+  scripts/_python.sh forinstall folders <dir>...                 each a 0700 folder
+  scripts/_python.sh forinstall warp-account <device dir>        the device's WARP account and profile in warp/
+  scripts/_python.sh forinstall daemon-warp <device dir> <file>  this Mac's warp.conf for the daemon, from warp/
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     def body() -> int:
         cmd, rest = (args[0], args[1:]) if args else ("", [])
         if cmd not in COMMANDS or len(rest) != ARGS.get(cmd, len(rest)) or not rest:
-            raise Error("usage: python3 -m wgtun.forinstall " + "|".join(COMMANDS) + " <args> (see its docstring)")
+            raise Error("usage: scripts/_python.sh forinstall " + "|".join(COMMANDS) + " <args> (see its docstring)")
         for out in COMMANDS[cmd](rest):
             print(out)
         return 0

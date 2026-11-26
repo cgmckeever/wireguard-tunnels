@@ -62,7 +62,7 @@ done
 ok() { printf '  ok       %s\n' "$*"; }
 changed() { printf '  changed  %s\n' "$*"; }
 # The store's own steps, done by the code the sweep and singbox.sh use (wgtun/forinstall.py)
-forinstall() { PYTHONPATH="$REPO${PYTHONPATH:+:$PYTHONPATH}" python3 -m wgtun.forinstall "$@"; }
+forinstall() { "$REPO/scripts/_python.sh" forinstall "$@"; }
 
 [ "$(uname -s)" = Darwin ] || die "macOS only"
 [ "$(id -u)" -ne 0 ] || die "Run as your user, not root (Homebrew refuses root); it uses sudo where needed"
