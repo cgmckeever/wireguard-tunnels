@@ -1258,6 +1258,7 @@ It reconnects behind the tunnel and breaks it. Turn it off (the tunnel → Edit 
         tunnel="$1"
         [ -n "$(tsv_get "$tunnel")" ] || die "No tunnel '${tunnel}' (tunnel.sh list)"
     else
+        [ -n "$1" ] || [ -t 0 ] || die "Which tunnel? (no terminal to ask in: tunnel.sh up <name>)"
         if [ -n "$1" ]; then answer=y; else read -rp "warped [Y/n]: " answer; fi
         [[ "$answer" =~ ^[Nn] ]] && kind=other || kind=warped
         tunnel=$(pick "$1" "$kind") || return 1
