@@ -226,10 +226,10 @@ and Export Diagnostics only work with the default location.
 
 This repo needs only `devices/`, one folder per device that runs tunnels.
 `~/wg-tunnels` is also where [wireguard-tools](#shared-folder) keeps its
-files. `fleet/` (its [servers](#servers-wireguard-tools)) and `pucks/` (its
-[pucks](#pucks-wireguard-tools)) are wireguard-tools' alone: without it they
-don't exist, and nothing here needs them. With it, this repo reads only each
-server's `login` and `carriers/`, and never `pucks/`.
+files: `fleet/` holds the systems it manages, its
+[servers](#servers-wireguard-tools) and [pucks](#pucks-wireguard-tools).
+Without wireguard-tools there's no `fleet/`, and nothing here needs one. With
+it, this repo reads only each server's `login` and `carriers/`.
 
 ```
 ~/wg-tunnels/
@@ -240,15 +240,15 @@ server's `login` and `carriers/`, and never `pucks/`.
     .default       this Mac's device name, e.g. mbp-1 (Local Mac Tunnels only)
     mbp-1/         this Mac
     iphone/        a sing-box device
-  fleet/           wireguard-tools' own; not needed here
+  fleet/           the systems wireguard-tools manages; not needed here
     servers/
       dengar/      one of its servers
         login      wgt-ctl's SSH login; nord.sh offers only servers with one
         carriers/  its exits (below)
         backups/   wireguard-tools' own (archives, private keys)
+    pucks/
+      puck1/       one puck's settings (tunnel-puck's own, below)
     device-list.json wireguard-tools' device numbers
-  pucks/           wireguard-tools' own; not needed here
-    puck1/         one puck's settings (tunnel-puck's own, below)
 ```
 
 ### Devices
@@ -881,8 +881,8 @@ nord.sh server dengar us "new york"       # fleet/servers/dengar/carriers/nord.u
 
 Only with [wireguard-tools](https://github.com/cgmckeever/wireguard-tools);
 without it, skip this section. `~/wg-tunnels` is the storage both repos
-share: `devices/` for the configs, plus `fleet/` and `pucks/`, which only
-wireguard-tools uses. wireguard-tools reads each server's exits from
+share: `devices/` for the configs, plus `fleet/`, the systems only
+wireguard-tools manages. wireguard-tools reads each server's exits from
 `fleet/servers/<server>/carriers/` ([below](#servers-wireguard-tools)) and puts the client configs
 it issues in `devices/<device>/config/` ([Devices](#devices)). Whichever runs
 first creates `~/wg-tunnels`, and both read its location from `$WG_TUNNELS`
@@ -930,7 +930,7 @@ network. Clients of one of your wireguard-tools servers can then exit from the
 friend's home IP, or reach that home's network. Pucks are part of
 wireguard-tools: its [tunnel-puck](https://github.com/cgmckeever/wireguard-tools/tree/main/tunnel-puck#readme)
 sets them up, and its `tpk-ctl.sh` keeps each puck's settings in
-`pucks/<puck>/`. This repo never reads them.
+`fleet/pucks/<puck>/`. This repo never reads them.
 
 The configs a puck's clients use come from the server, so wgt-ctl delivers
 them to `devices/<device>/config/` like any other (`bossk.puck1.iphone.conf`),
