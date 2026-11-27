@@ -65,3 +65,4 @@
 600 ./devices/edge5/sing-box/warp.edge5.json
 700 ./devices/edge5/warp
 600 ./devices/edge5/warp/wgcf-profile.conf
+600 ./devices/README-tunnels.md

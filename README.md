@@ -238,6 +238,7 @@ it, this repo reads only each server's `login` and `carriers/`.
   diag/            tunnel.sh diag output (keys removed)
   devices/
     .default       this Mac's device name, e.g. mbp-1 (Local Mac Tunnels only)
+    README-tunnels.md  what this folder is (wireguard-tools adds its own README-tools.md)
     mbp-1/         this Mac
     iphone/        a sing-box device
   fleet/           the systems wireguard-tools manages; not needed here

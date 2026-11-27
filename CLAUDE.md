@@ -34,6 +34,10 @@ the behavior; this file says how to change it without tangling it again.
     has that line too (copied from its carrier), but it's the sweep's:
     extract replaces it like the rest.
   - Nothing else in `config/` is ours to rewrite.
+- **Each repo writes its own README in `devices/`:** `README-tunnels.md`
+  here (`store.write_readme`, from `wgtun/readmes/`), `README-tools.md` by
+  wireguard-tools. Each is written when missing and never changed, and
+  neither is a device: everything that lists `devices/` takes folders only.
 - **`tunnel.sh` stays one standalone bash file.** It's the root daemon,
   copied to `/usr/local/sbin/wg-tunnels`, so it must never source or import
   code from this user-writable repo.

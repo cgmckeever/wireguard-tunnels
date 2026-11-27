@@ -145,3 +145,19 @@ def test_an_indented_section_header_counts():
     """As wg-quick and tunnel.sh read it."""
     text = "  [Interface]\nPrivateKey = a\nAddress = 10.0.0.2/32\n  [Peer]\nPublicKey = b\nEndpoint = h:1\n"
     assert Conf(text).problem() == ""
+
+
+def test_devices_gets_its_readme_once(tmp_store):
+    """README-tunnels.md when missing (wireguard-tools' README-tools.md is its own);
+    one already there is kept, and it's never taken for a device."""
+    store.private_dir(store.device_dir("phone"))
+    path = os.path.join(store.devices_dir(), "README-tunnels.md")
+    with open(path, encoding="utf-8") as f:
+        assert "wireguard-tunnels" in f.read()
+    assert store.mode(path) == 0o600
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("mine\n")
+    store.private_dir(store.device_dir("phone"))
+    with open(path, encoding="utf-8") as f:
+        assert f.read() == "mine\n"
+    assert store.all_devices() == ["phone"]

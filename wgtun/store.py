@@ -255,12 +255,34 @@ def update_private(path: str, text: str) -> str:
 
 
 def private_dir(path: str) -> bool:
-    """Make path a 0700 folder; whether that changed anything."""
+    """Make path a 0700 folder; whether that changed anything. devices/ then
+    gets its README (write_readme)."""
     if os.path.isdir(path) and mode(path) == 0o700:
+        write_readme()
         return False
     os.makedirs(path, exist_ok=True)
     os.chmod(path, 0o700)
+    write_readme()
     return True
+
+
+README = "README-tunnels.md"     # wireguard-tools writes its own README-tools.md beside it
+
+
+def write_readme() -> None:
+    """devices/, if it exists, gets README-tunnels.md if it has none (one already
+    there is kept, edited or not)."""
+    path = os.path.join(devices_dir(), README)
+    if not os.path.isdir(devices_dir()) or os.path.lexists(path):
+        return
+    with open(os.path.join(os.path.dirname(__file__), "readmes", "devices.md"), encoding="utf-8") as f:
+        text = f.read()
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        out.write(text)
 
 
 # --- the device's WARP account ---
