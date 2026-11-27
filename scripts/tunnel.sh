@@ -101,8 +101,8 @@ STATE="$ETC/state"                     # desired (up <name> | down | pause <name
 WARP_SRC="$PREFIX/etc/wireguard/warp.conf"  # written by install.sh
 WG_RUN="${WGT_WG_RUN:-/var/run/wireguard}"  # wg-quick's <iface>.name -> utunN
 
-WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
-TUNNELS="$WG_TUNNELS/devices"          # one folder per device
+WG_CONFIG_HOME="${WG_CONFIG_HOME:-$HOME/wg-tunnels}"  # the store shared with wireguard-tools
+TUNNELS="$WG_CONFIG_HOME/devices"          # one folder per device
 DEFAULT_FILE="$TUNNELS/.default"        # this Mac's device: one line, its folder name
 WAIT_SECS=30
 WATCH_SECS=30
@@ -133,7 +133,7 @@ need_root() {
 
 # --- this Mac's device folder ---
 
-# devices: the device folders in $WG_TUNNELS/devices, one per line
+# devices: the device folders in $WG_CONFIG_HOME/devices, one per line
 devices() {
     local d
     for d in "$TUNNELS"/*/; do
@@ -142,7 +142,7 @@ devices() {
 }
 
 # default [device]: show or pick this Mac's device folder, saved in
-# $WG_TUNNELS/devices/.default. Changing it leaves the daemon's tunnels alone.
+# $WG_CONFIG_HOME/devices/.default. Changing it leaves the daemon's tunnels alone.
 cmd_default() {
     local cur pick answer i devs=()
     cur=$(cat "$DEFAULT_FILE" 2>/dev/null)
@@ -968,7 +968,7 @@ EOF
 
 # DNS values from every tunnel config (wg-quick sets these on every network
 # service and only puts the old ones back on a clean `down`)
-# $1: the user's $WG_TUNNELS (sudo drops the environment), else ~user/wg-tunnels
+# $1: the user's $WG_CONFIG_HOME (sudo drops the environment), else ~user/wg-tunnels
 tunnel_dns() {
     local f store
     store="${1:-$(eval echo "~${SUDO_USER:-root}")/wg-tunnels}"
@@ -1337,7 +1337,7 @@ cmd_resume() {
 # diag [file]: everything needed to debug, in one file, keys removed. Runs the
 # repo's copy as root (works when the daemon is broken); the file is yours.
 cmd_diag() {
-    local out="${1:-$WG_TUNNELS/diag/diag-$(date +%Y%m%d-%H%M%S).txt}"
+    local out="${1:-$WG_CONFIG_HOME/diag/diag-$(date +%Y%m%d-%H%M%S).txt}"
     mkdir -p "$(dirname "$out")" || die "diag: can't make $(dirname "$out")"
     sudo "$0" _diag > "$out" || { rm -f "$out"; die "diag: failed"; }
     echo "$out"
@@ -1393,7 +1393,7 @@ cmd_breakglass() {
     echo "Breakglass: stop every tunnel and put the normal connection back"
     stop_app_tunnels
     # The repo copy, not the installed one: works when that's missing or broken
-    sudo "$0" _breakglass "$WG_TUNNELS"
+    sudo "$0" _breakglass "$WG_CONFIG_HOME"
 }
 
 cmd_down() {

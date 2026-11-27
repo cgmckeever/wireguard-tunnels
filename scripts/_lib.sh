@@ -7,8 +7,8 @@
 
 PROG=$(basename "$SELF")                        # nord.sh, qr.sh: through a link too
 HERE=$(dirname "$SELF")                         # the sourcing script's folder
-WG_TUNNELS="${WG_TUNNELS:-$HOME/wg-tunnels}"    # the store shared with wireguard-tools
-DEVICES="$WG_TUNNELS/devices"
+WG_CONFIG_HOME="${WG_CONFIG_HOME:-$HOME/wg-tunnels}"    # the store shared with wireguard-tools
+DEVICES="$WG_CONFIG_HOME/devices"
 DEFAULT_FILE="$DEVICES/.default"                # this Mac's device (tunnel.sh default)
 MAC=$(cat "$DEFAULT_FILE" 2>/dev/null)
 

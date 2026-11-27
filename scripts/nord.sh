@@ -35,7 +35,7 @@
 # device's carrier or config) already uses is skipped for the next recommended
 # one.
 #
-# The access token comes from $WG_TUNNELS/.nord-token (Nord account >
+# The access token comes from $WG_CONFIG_HOME/.nord-token (Nord account >
 # NordVPN > Manual setup > access token), never from an argument.
 # Needs curl and jq.
 
@@ -43,8 +43,8 @@ set -o pipefail
 umask 077
 SELF=$(readlink -f "$0"); . "$(dirname "$SELF")/_lib.sh"
 
-TOKEN_FILE="$WG_TUNNELS/.nord-token"
-SERVERS="$WG_TUNNELS/fleet/servers"         # wireguard-tools' servers (its wgt/ctl/home.py)
+TOKEN_FILE="$WG_CONFIG_HOME/.nord-token"
+SERVERS="$WG_CONFIG_HOME/fleet/servers"         # wireguard-tools' servers (its wgt/ctl/home.py)
 API=https://api.nordvpn.com/v1
 PORT=51820
 ADDRESS=10.5.0.2/32                         # NordLynx gives every client this

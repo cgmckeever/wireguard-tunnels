@@ -1,4 +1,4 @@
-"""~/wg-tunnels ($WG_TUNNELS): where things are, what they're called, and the
+"""~/wg-tunnels ($WG_CONFIG_HOME): where things are, what they're called, and the
 rules every tunnel follows."""
 
 from __future__ import annotations
@@ -47,7 +47,7 @@ def run_main(prog: str, body: Callable[[], Optional[int]]) -> int:
 # --- where things are ---
 
 def root() -> str:
-    return os.environ.get("WG_TUNNELS") or os.path.expanduser("~/wg-tunnels")
+    return os.environ.get("WG_CONFIG_HOME") or os.path.expanduser("~/wg-tunnels")
 
 
 def devices_dir() -> str:

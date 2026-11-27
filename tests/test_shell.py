@@ -226,7 +226,7 @@ def test_nord_offers_only_the_servers_wireguard_tools_lists(tmp_path):
     (servers / "removed" / "backups").mkdir(parents=True)
 
     def nord(*args):
-        env = dict(os.environ, WG_TUNNELS=str(tmp_path))
+        env = dict(os.environ, WG_CONFIG_HOME=str(tmp_path))
         return subprocess.run(["bash", os.path.join(REPO, "scripts", "nord.sh"), *args], env=env,
                               stdin=subprocess.DEVNULL, capture_output=True, text=True)
 

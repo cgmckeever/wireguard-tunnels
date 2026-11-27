@@ -1,7 +1,7 @@
 # CLAUDE.md — working on wireguard-tunnels
 
 macOS tooling for WireGuard configs kept in a folder store (`~/wg-tunnels`,
-or `$WG_TUNNELS`) that's shared with wireguard-tools. The README describes
+or `$WG_CONFIG_HOME`) that's shared with wireguard-tools. The README describes
 the behavior; this file says how to change it without tangling it again.
 
 ## The contract between the parts

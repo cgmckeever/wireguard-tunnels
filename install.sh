@@ -14,7 +14,7 @@
 #
 #   (default)     Local Mac Tunnels, and what Sing-Box Device Tunnels need too.
 #                 Homebrew packages wireguard-tools, wgcf, jq and qrencode;
-#                 this Mac's device folder $WG_TUNNELS/devices/<name> (default
+#                 this Mac's device folder $WG_CONFIG_HOME/devices/<name> (default
 #                 ~/wg-tunnels; asked the first time, then kept in devices/.default);
 #                 a Cloudflare WARP account and $(brew --prefix)/etc/wireguard/warp.conf;
 #                 the daemon (/usr/local/sbin/wg-tunnels + LaunchDaemon, sudo)
@@ -40,7 +40,7 @@
 set -u
 
 REPO=$(dirname "$(readlink -f "$0")")
-SELF="$REPO/install.sh"; . "$REPO/scripts/_lib.sh"   # WG_TUNNELS, DEVICES, DEFAULT_FILE, MAC, die, usage, folders
+SELF="$REPO/install.sh"; . "$REPO/scripts/_lib.sh"   # WG_CONFIG_HOME, DEVICES, DEFAULT_FILE, MAC, die, usage, folders
 SWIFTBAR_APP="/Applications/SwiftBar.app"
 SWIFTBAR_AGENT="$HOME/Library/LaunchAgents/com.local.swiftbar.plist"
 
@@ -109,10 +109,10 @@ for pkg in $pkgs; do
     fi
 done
 
-echo "== $WG_TUNNELS"
+echo "== $WG_CONFIG_HOME"
 
 if [ "$singbox_only" = 1 ]; then
-    forinstall folders "$WG_TUNNELS" "$DEVICES" || exit 1
+    forinstall folders "$WG_CONFIG_HOME" "$DEVICES" || exit 1
     if [ -z "$device" ] && [ -t 0 ]; then
         read -rp "  First sing-box device name (e.g. iphone; Enter to skip): " device
     fi
@@ -160,7 +160,7 @@ umask 077    # until warp.conf is written: everything here holds private keys
 #       exports/     WireGuard app "Export Tunnels to Zip" (every private key, plain text)
 #       warp/        the wgcf WARP account and profile
 #       sing-box/    profiles from singbox.sh build, if you use sing-box here
-forinstall folders "$WG_TUNNELS" "$DEVICES" "$DEV_DIR" "$DEV_DIR/carriers" "$DEV_DIR/config" \
+forinstall folders "$WG_CONFIG_HOME" "$DEVICES" "$DEV_DIR" "$DEV_DIR/carriers" "$DEV_DIR/config" \
     "$DEV_DIR/exports" "$WARP_DIR" || exit 1
 if [ "$MAC" = "$device" ]; then
     ok "default device $device"

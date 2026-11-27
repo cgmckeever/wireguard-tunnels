@@ -1,4 +1,4 @@
-"""A throwaway store per test ($WG_TUNNELS in tmp_path), with fake keys."""
+"""A throwaway store per test ($WG_CONFIG_HOME in tmp_path), with fake keys."""
 
 from __future__ import annotations
 
@@ -74,7 +74,7 @@ class Store:
 def tmp_store(tmp_path, monkeypatch) -> Iterator[Store]:
     root = str(tmp_path / "wg-tunnels")
     os.makedirs(os.path.join(root, "devices"), mode=0o700)
-    monkeypatch.setenv("WG_TUNNELS", root)
+    monkeypatch.setenv("WG_CONFIG_HOME", root)
     os.umask(0o077)             # as the scripts' main()s set it (_umask puts it back)
     yield Store(root)
 

@@ -217,7 +217,7 @@ Everything lives in `~/wg-tunnels`, and its folders are all `0700`: they
 hold private keys. Nothing here sends them anywhere; only the sing-box
 profiles you send yourself leave the Mac.
 
-To keep it elsewhere, set `$WG_TUNNELS` to an absolute path (not `~/…`) in
+To keep it elsewhere, set `$WG_CONFIG_HOME` to an absolute path (not `~/…`) in
 your shell profile before the first `install.sh`; every script here, and
 wireguard-tools, reads it. This
 README writes `~/wg-tunnels` either way. The
@@ -886,7 +886,7 @@ share: `devices/` for the configs, plus `fleet/`, the systems only
 wireguard-tools manages. wireguard-tools reads each server's exits from
 `fleet/servers/<server>/carriers/` ([below](#servers-wireguard-tools)) and puts the client configs
 it issues in `devices/<device>/config/` ([Devices](#devices)). Whichever runs
-first creates `~/wg-tunnels`, and both read its location from `$WG_TUNNELS`
+first creates `~/wg-tunnels`, and both read its location from `$WG_CONFIG_HOME`
 ([Your folders](#your-folders)).
 
 **Configs wireguard-tools issued** start with

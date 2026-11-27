@@ -1,6 +1,6 @@
 """wireguard-tunnels: the store's config work (the sweep, sing-box profiles, the check).
 
-The store is ~/wg-tunnels ($WG_TUNNELS), shared with wireguard-tools:
+The store is ~/wg-tunnels ($WG_CONFIG_HOME), shared with wireguard-tools:
 
   devices/<device>/carriers/   WireGuard configs to carry WARP (as downloaded)
   devices/<device>/warp/       the device's own wgcf WARP account and profile

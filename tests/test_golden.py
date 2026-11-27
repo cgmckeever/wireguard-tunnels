@@ -57,7 +57,7 @@ def ran(tmp_path, monkeypatch) -> tuple:
     """(the store, what was printed) after every run the shell's golden had."""
     root = str(tmp_path / "store")
     edge_store.make(root)
-    monkeypatch.setenv("WG_TUNNELS", root)
+    monkeypatch.setenv("WG_CONFIG_HOME", root)
     monkeypatch.setenv("LC_ALL", "en_US.UTF-8")      # the collation the goldens were made in
     monkeypatch.setattr(sweep, "command", lambda argv: "")   # no WireGuard app here: as recorded
     old = os.umask(0o022)                             # a terminal's: each main() sets its own
